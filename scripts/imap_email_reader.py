@@ -1,8 +1,7 @@
 """
-IMAP Email Reader
+Outlook Email Reader
 
-This script reads emails using IMAP protocol, which works with most email providers
-(Gmail, Outlook.com, etc.).
+This script reads Outlook emails using IMAP protocol.
 
 Usage:
     python scripts/imap_email_reader.py --config config/imap_config.json

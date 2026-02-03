@@ -9,35 +9,31 @@ Get up and running with the Email Workflow Automation project in 5 minutes.
 pip install -r requirements.txt
 ```
 
-## Step 2: Configure Email Access
-
-**Works with Gmail, Outlook.com, and most email providers**
+## Step 2: Configure Outlook Email Access
 
 1. Copy the example config:
    ```bash
    cp config/imap_config.json.example config/imap_config.json
    ```
 
-2. Edit `config/imap_config.json` with your email credentials:
+2. Edit `config/imap_config.json` with your Outlook credentials:
    ```json
    {
-     "imap_server": "imap.gmail.com",
+     "imap_server": "outlook.office365.com",
      "imap_port": 993,
-     "smtp_server": "smtp.gmail.com",
+     "smtp_server": "smtp.office365.com",
      "smtp_port": 587,
-     "username": "your-email@gmail.com",
-     "password": "your-app-password"
+     "use_tls": true,
+     "username": "your-email@outlook.com",
+     "password": "your-password"
    }
    ```
 
-3. **For Gmail users:**
-   - Enable 2-Factor Authentication
-   - Generate an App Password: https://myaccount.google.com/apppasswords
-   - Use the App Password (not your regular password)
-
-4. **For Outlook.com users:**
-   - Enable IMAP in account settings
-   - Use your regular password or an App Password
+3. **Enable IMAP in Outlook:**
+   - Go to Outlook.com settings (https://outlook.live.com/mail)
+   - Navigate to **Settings** > **Mail** > **Sync email**
+   - Enable **IMAP access**
+   - If your account requires it, generate an App Password from your Microsoft account security settings
 
 5. Test email reading:
    ```bash
@@ -103,15 +99,15 @@ curl -X POST http://localhost:5000/api/predict \
 ## Troubleshooting
 
 - **IMAP connection error**: 
-  - Verify your email and password are correct
-  - For Gmail: Make sure you're using an App Password, not your regular password
-  - Check that IMAP is enabled in your email account settings
-  - Verify the IMAP server address and port are correct for your provider
+  - Verify your Outlook email and password are correct
+  - Check that IMAP is enabled in Outlook.com settings
+  - Some Office 365 accounts may require an App Password instead of your regular password
+  - Verify the IMAP server is set to `outlook.office365.com` and port `993`
 
 - **SMTP sending fails**:
-  - Check SMTP server settings match your email provider
-  - Ensure TLS/SSL settings are correct (usually TLS for port 587)
-  - For Gmail: Use App Password, not regular password
+  - Check SMTP server is set to `smtp.office365.com` and port `587`
+  - Ensure `use_tls` is set to `true`
+  - Some accounts may require an App Password for SMTP
 
 - **API not responding**: Check if port 5000 is available
 - **No emails collected**: Run `python scripts/imap_email_reader.py` manually to test

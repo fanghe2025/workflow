@@ -1,10 +1,10 @@
 # Email Workflow Automation with ML Labeling
 
-This project reads and processes emails (including attachments) using IMAP and trains a machine learning model to automatically label emails based on their content.
+This project reads and processes Outlook emails (including attachments) using IMAP and trains a machine learning model to automatically label emails based on their content.
 
 ## Features
 
-- ✅ **Email Processing**: Reads emails from any IMAP-compatible provider (Gmail, Outlook.com, etc.)
+- ✅ **Outlook Email Processing**: Reads emails from Outlook.com and Office 365 accounts
 - ✅ **Attachment Support**: Downloads and extracts text from PDFs, Word docs, Excel files, and more
 - ✅ **ML-Based Labeling**: Trains a model on labeled emails to predict categories
 - ✅ **REST API**: Flask API server for real-time predictions
@@ -45,10 +45,10 @@ This project reads and processes emails (including attachments) using IMAP and t
    python --version  # Should be 3.8 or higher
    ```
 
-2. **Email Account with IMAP Access**
-   - Gmail, Outlook.com, or any IMAP-compatible provider
-   - For Gmail: Enable 2FA and generate an App Password
-   - For Outlook.com: Enable IMAP in account settings
+2. **Outlook Email Account**
+   - Outlook.com or Office 365 account
+   - IMAP must be enabled in account settings
+   - Some accounts may require an App Password instead of your regular password
 
 ## Installation
 
@@ -66,25 +66,26 @@ pip install -r requirements.txt
    cp config/imap_config.json.example config/imap_config.json
    ```
 
-2. Edit `config/imap_config.json` with your email credentials:
+2. Edit `config/imap_config.json` with your Outlook credentials:
    ```json
    {
-     "imap_server": "imap.gmail.com",
+     "imap_server": "outlook.office365.com",
      "imap_port": 993,
-     "smtp_server": "smtp.gmail.com",
+     "smtp_server": "smtp.office365.com",
      "smtp_port": 587,
      "use_tls": true,
-     "username": "your-email@gmail.com",
-     "password": "your-app-password"
+     "username": "your-email@outlook.com",
+     "password": "your-password"
    }
    ```
 
-3. **For Gmail users:**
-   - Enable 2-Factor Authentication
-   - Generate an App Password: https://myaccount.google.com/apppasswords
-   - Use the App Password (not your regular password)
+3. **Enable IMAP in Outlook:**
+   - Go to Outlook.com settings
+   - Navigate to Mail > Sync email
+   - Enable IMAP access
+   - If your account requires it, generate an App Password
 
-4. See `IMAP_SETUP.md` for detailed setup instructions for different providers.
+4. See `IMAP_SETUP.md` for detailed Outlook setup instructions.
 
 ### 3. Configure Training Settings
 

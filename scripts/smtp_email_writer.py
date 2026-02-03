@@ -1,8 +1,7 @@
 """
-SMTP Email Writer
+Outlook Email Writer
 
-This script sends emails using SMTP protocol, which works with most email providers
-(Gmail, Outlook.com, etc.).
+This script sends Outlook emails using SMTP protocol.
 
 Usage:
     python scripts/smtp_email_writer.py --config config/imap_config.json --to recipient@example.com --subject "Test" --body "Email body"

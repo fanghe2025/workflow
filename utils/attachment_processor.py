@@ -241,7 +241,7 @@ class AttachmentProcessor:
             attachment_path = os.path.join(attachments_dir, attachment_name)
 
             # Process attachment
-            # Note: In n8n workflow, attachment content should be downloaded first
+            # Note: Attachment content should be downloaded first
             result = self.process_attachment(
                 file_path=attachment_path, content_type=attachment.get("contentType")
             )

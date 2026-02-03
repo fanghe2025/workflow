@@ -1,6 +1,6 @@
-# IMAP Email Setup Guide
+# Outlook Email Setup Guide
 
-This guide shows you how to read and write emails **without Azure credentials** using IMAP/SMTP.
+This guide shows you how to read and write Outlook emails using IMAP/SMTP.
 
 ## Quick Setup
 
@@ -10,30 +10,9 @@ This guide shows you how to read and write emails **without Azure credentials** 
 cp config/imap_config.json.example config/imap_config.json
 ```
 
-### 2. Configure Your Email Provider
+### 2. Configure Outlook
 
-Edit `config/imap_config.json` with your email settings:
-
-#### Gmail
-
-```json
-{
-  "imap_server": "imap.gmail.com",
-  "imap_port": 993,
-  "smtp_server": "smtp.gmail.com",
-  "smtp_port": 587,
-  "use_tls": true,
-  "username": "your-email@gmail.com",
-  "password": "your-app-password"
-}
-```
-
-**Gmail Setup Steps:**
-1. Enable 2-Factor Authentication: https://myaccount.google.com/security
-2. Generate App Password: https://myaccount.google.com/apppasswords
-3. Use the 16-character App Password (not your regular password)
-
-#### Outlook.com / Office 365
+Edit `config/imap_config.json` with your Outlook settings:
 
 ```json
 {
@@ -47,10 +26,14 @@ Edit `config/imap_config.json` with your email settings:
 }
 ```
 
-**Outlook.com Setup:**
-1. Go to Settings > Mail > Sync email
-2. Enable IMAP access
-3. Use your regular password or generate an App Password
+**Outlook.com Setup Steps:**
+1. Go to Outlook.com settings: https://outlook.live.com/mail
+2. Navigate to **Settings** (gear icon) > **Mail** > **Sync email**
+3. Enable **IMAP access**
+4. If your account requires it, generate an App Password:
+   - Go to https://account.microsoft.com/security
+   - Under "App passwords", create a new app password
+   - Use the generated password instead of your regular password
 
 ## Usage
 
@@ -116,27 +99,34 @@ The IMAP reader saves emails in the same JSON format, so they work seamlessly wi
 ### Connection Errors
 
 - **"Authentication failed"**: 
-  - For Gmail: Make sure you're using an App Password, not your regular password
-  - Check that 2FA is enabled and App Password is generated correctly
+  - Verify your Outlook email and password are correct
+  - Some Office 365 accounts require an App Password instead of your regular password
+  - Check that IMAP is enabled in Outlook.com settings
 
 - **"Connection refused"**:
-  - Verify IMAP/SMTP server addresses are correct
+  - Verify IMAP server is set to `outlook.office365.com` and port `993`
+  - Verify SMTP server is set to `smtp.office365.com` and port `587`
   - Check firewall settings
   - Some networks block IMAP/SMTP ports
 
 - **"SSL/TLS error"**:
-  - Verify `use_tls` setting matches your provider
-  - Gmail/Outlook.com: Use TLS (port 587 for SMTP, 993 for IMAP)
-
-### Gmail Specific Issues
-
-- **"Less secure app access"**: Gmail no longer supports this. You MUST use App Passwords.
-- **"Access blocked"**: You may need to allow access from your IP address in Google Account settings.
+  - Ensure `use_tls` is set to `true`
+  - Outlook.com uses TLS (port 587 for SMTP, 993 for IMAP)
 
 ### Outlook.com Specific Issues
 
-- **IMAP not working**: Make sure IMAP is enabled in Outlook.com settings
-- **Modern Authentication**: Some Office 365 accounts may require OAuth2. For these accounts, you may need to use an App Password or enable IMAP access in account settings.
+- **IMAP not working**: 
+  - Make sure IMAP is enabled in Outlook.com settings (Settings > Mail > Sync email)
+  - Some accounts may need to enable IMAP from the Outlook web interface
+
+- **Modern Authentication**: 
+  - Some Office 365 accounts may require an App Password instead of your regular password
+  - Generate an App Password from https://account.microsoft.com/security
+  - Use the App Password in your config file
+
+- **Office 365 Business/Enterprise accounts**:
+  - May have additional security requirements
+  - Contact your IT administrator if IMAP access is restricted
 
 ## Security Notes
 
@@ -150,9 +140,9 @@ The IMAP reader saves emails in the same JSON format, so they work seamlessly wi
 For better security, you can use environment variables instead of the config file:
 
 ```bash
-export IMAP_SERVER="imap.gmail.com"
-export IMAP_USERNAME="your-email@gmail.com"
-export IMAP_PASSWORD="your-app-password"
+export IMAP_SERVER="outlook.office365.com"
+export IMAP_USERNAME="your-email@outlook.com"
+export IMAP_PASSWORD="your-password"
 ```
 
 Then modify the scripts to read from environment variables.
