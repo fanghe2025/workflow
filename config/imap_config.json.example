@@ -1,0 +1,26 @@
+{
+  "imap_server": "imap.gmail.com",
+  "imap_port": 993,
+  "smtp_server": "smtp.gmail.com",
+  "smtp_port": 587,
+  "use_tls": true,
+  "username": "your-email@gmail.com",
+  "password": "your-app-password",
+  "provider": "gmail",
+  "notes": {
+    "gmail": {
+      "imap_server": "imap.gmail.com",
+      "imap_port": 993,
+      "smtp_server": "smtp.gmail.com",
+      "smtp_port": 587,
+      "note": "For Gmail, you need to enable 'Less secure app access' or use an App Password"
+    },
+    "outlook": {
+      "imap_server": "outlook.office365.com",
+      "imap_port": 993,
+      "smtp_server": "smtp.office365.com",
+      "smtp_port": 587,
+      "note": "For Outlook.com, you may need to enable IMAP in account settings"
+    },
+  }
+}

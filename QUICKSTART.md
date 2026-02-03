@@ -12,7 +12,51 @@ pip install -r requirements.txt
 npm install -g n8n
 ```
 
-## Step 2: Configure Outlook API
+## Step 2: Configure Email Access
+
+You have two options for email access:
+
+### Option A: IMAP (No Azure Required) - Recommended for Quick Start
+
+**Works with Gmail, Outlook.com, Yahoo, and most email providers**
+
+1. Copy the example config:
+   ```bash
+   cp config/imap_config.json.example config/imap_config.json
+   ```
+
+2. Edit `config/imap_config.json` with your email credentials:
+   ```json
+   {
+     "imap_server": "imap.gmail.com",
+     "imap_port": 993,
+     "smtp_server": "smtp.gmail.com",
+     "smtp_port": 587,
+     "username": "your-email@gmail.com",
+     "password": "your-app-password"
+   }
+   ```
+
+3. **For Gmail users:**
+   - Enable 2-Factor Authentication
+   - Generate an App Password: https://myaccount.google.com/apppasswords
+   - Use the App Password (not your regular password)
+
+4. **For Outlook.com users:**
+   - Enable IMAP in account settings
+   - Use your regular password or an App Password
+
+5. Test email reading:
+   ```bash
+   python scripts/imap_email_reader.py --limit 5
+   ```
+
+6. Test email sending:
+   ```bash
+   python scripts/smtp_email_writer.py --to recipient@example.com --subject "Test" --body "Hello"
+   ```
+
+### Option B: Azure Outlook API (Requires Azure Account)
 
 1. Copy the example config:
    ```bash
@@ -51,6 +95,31 @@ The API will be available at http://localhost:5000
 
 ## Step 5: Collect and Label Emails
 
+### If using IMAP (Option A):
+
+1. Collect emails using the IMAP reader:
+   ```bash
+   # Fetch last 50 emails
+   python scripts/imap_email_reader.py --limit 50 --download-attachments
+   
+   # Or fetch emails since a specific date
+   python scripts/imap_email_reader.py --since 01-Jan-2024 --download-attachments
+   ```
+
+2. Check `data/processed_emails/` for collected emails
+
+3. Process attachments (if needed):
+   ```bash
+   python scripts/process_attachments.py
+   ```
+
+4. Label emails:
+   ```bash
+   python scripts/label_emails.py
+   ```
+
+### If using Azure/n8n (Option B):
+
 1. Wait for emails to be collected (workflow runs every minute)
 2. Check `data/processed_emails/` for collected emails
 3. Process attachments (if needed):
@@ -86,9 +155,22 @@ curl -X POST http://localhost:5000/api/predict \
 
 ## Troubleshooting
 
+- **IMAP connection error**: 
+  - Verify your email and password are correct
+  - For Gmail: Make sure you're using an App Password, not your regular password
+  - Check that IMAP is enabled in your email account settings
+  - Verify the IMAP server address and port are correct for your provider
+
+- **SMTP sending fails**:
+  - Check SMTP server settings match your email provider
+  - Ensure TLS/SSL settings are correct (usually TLS for port 587)
+  - For Gmail: Use App Password, not regular password
+
 - **n8n OAuth error**: Make sure redirect URI matches in Azure portal
 - **API not responding**: Check if port 5000 is available
-- **No emails collected**: Verify Outlook credentials in n8n
+- **No emails collected**: 
+  - If using IMAP: Run `python scripts/imap_email_reader.py` manually to test
+  - If using n8n: Verify Outlook credentials in n8n
 - **Model training fails**: Ensure you have labeled emails in `data/labeled_emails.json`
 
 ## Next Steps

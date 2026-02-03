@@ -25,11 +25,6 @@ try:
 except ImportError:
     openpyxl = None
 
-try:
-    from pptx import Presentation
-except ImportError:
-    Presentation = None
-
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -107,7 +102,6 @@ class AttachmentProcessor:
             ".txt": "text/plain",
             ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             ".xls": "application/vnd.ms-excel",
-            ".ppt": "application/vnd.ms-powerpoint",
         }
         return content_types.get(extension, "application/octet-stream")
 

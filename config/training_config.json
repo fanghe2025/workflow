@@ -29,9 +29,7 @@
       "doc",
       "txt",
       "xlsx",
-      "xls",
-      "pptx",
-      "ppt"
+      "xls"
     ],
     "extract_text_from_images": false
   }

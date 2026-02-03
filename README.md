@@ -5,7 +5,7 @@ This project uses **n8n** for workflow automation to read and process Outlook em
 ## Features
 
 - ✅ **Outlook Email Processing**: Automatically monitors and processes incoming emails
-- ✅ **Attachment Support**: Downloads and extracts text from PDFs, Word docs, Excel files, PowerPoint, and more
+- ✅ **Attachment Support**: Downloads and extracts text from PDFs, Word docs, Excel files, and more
 - ✅ **ML-Based Labeling**: Trains a model on labeled emails to predict categories
 - ✅ **REST API**: Flask API server for real-time predictions
 - ✅ **Automated Workflow**: n8n workflow handles the entire pipeline
@@ -206,7 +206,6 @@ The attachment processor supports:
 - **PDF** (.pdf) - Text extraction
 - **Word Documents** (.docx, .doc) - Text extraction
 - **Excel Files** (.xlsx, .xls) - Cell content extraction
-- **PowerPoint** (.pptx, .ppt) - Slide text extraction
 - **Text Files** (.txt) - Direct text reading
 
 ## API Endpoints
