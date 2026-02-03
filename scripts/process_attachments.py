@@ -2,7 +2,7 @@
 Standalone script to process attachments from collected emails.
 
 This script can be run separately to extract text from attachments
-that were collected by the n8n workflow.
+that were collected from your email account.
 """
 
 import json

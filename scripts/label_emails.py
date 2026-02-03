@@ -1,7 +1,7 @@
 """
 Helper script to label emails for training.
 
-This script helps you manually label emails collected by the n8n workflow.
+This script helps you manually label emails collected from your email account.
 """
 
 import json

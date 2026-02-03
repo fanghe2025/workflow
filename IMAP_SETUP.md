@@ -52,25 +52,6 @@ Edit `config/imap_config.json` with your email settings:
 2. Enable IMAP access
 3. Use your regular password or generate an App Password
 
-#### Yahoo Mail
-
-```json
-{
-  "imap_server": "imap.mail.yahoo.com",
-  "imap_port": 993,
-  "smtp_server": "smtp.mail.yahoo.com",
-  "smtp_port": 587,
-  "use_tls": true,
-  "username": "your-email@yahoo.com",
-  "password": "your-app-password"
-}
-```
-
-**Yahoo Setup:**
-1. Go to Account Security settings
-2. Generate an App Password
-3. Use the App Password (not your regular password)
-
 ## Usage
 
 ### Read Emails
@@ -123,7 +104,7 @@ python scripts/smtp_email_writer.py \
 
 ## Integration with Workflow
 
-The IMAP reader saves emails in the same format as the n8n workflow, so they work seamlessly with the rest of the system:
+The IMAP reader saves emails in the same JSON format, so they work seamlessly with the rest of the system:
 
 1. **Read emails**: `python scripts/imap_email_reader.py --limit 50 --download-attachments`
 2. **Process attachments**: `python scripts/process_attachments.py`
@@ -135,7 +116,7 @@ The IMAP reader saves emails in the same format as the n8n workflow, so they wor
 ### Connection Errors
 
 - **"Authentication failed"**: 
-  - For Gmail/Yahoo: Make sure you're using an App Password, not your regular password
+  - For Gmail: Make sure you're using an App Password, not your regular password
   - Check that 2FA is enabled and App Password is generated correctly
 
 - **"Connection refused"**:
@@ -155,7 +136,7 @@ The IMAP reader saves emails in the same format as the n8n workflow, so they wor
 ### Outlook.com Specific Issues
 
 - **IMAP not working**: Make sure IMAP is enabled in Outlook.com settings
-- **Modern Authentication**: Some Office 365 accounts may require OAuth2 (use Azure method instead)
+- **Modern Authentication**: Some Office 365 accounts may require OAuth2. For these accounts, you may need to use an App Password or enable IMAP access in account settings.
 
 ## Security Notes
 

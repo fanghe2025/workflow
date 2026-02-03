@@ -1,14 +1,14 @@
 # Email Workflow Automation with ML Labeling
 
-This project uses **n8n** for workflow automation to read and process Outlook emails (including attachments) and trains a machine learning model to automatically label emails based on their content.
+This project reads and processes emails (including attachments) using IMAP and trains a machine learning model to automatically label emails based on their content.
 
 ## Features
 
-- ✅ **Outlook Email Processing**: Automatically monitors and processes incoming emails
+- ✅ **Email Processing**: Reads emails from any IMAP-compatible provider (Gmail, Outlook.com, etc.)
 - ✅ **Attachment Support**: Downloads and extracts text from PDFs, Word docs, Excel files, and more
 - ✅ **ML-Based Labeling**: Trains a model on labeled emails to predict categories
 - ✅ **REST API**: Flask API server for real-time predictions
-- ✅ **Automated Workflow**: n8n workflow handles the entire pipeline
+- ✅ **Email Sending**: Send emails via SMTP
 
 ## Project Structure
 
@@ -17,11 +17,10 @@ This project uses **n8n** for workflow automation to read and process Outlook em
 ├── api/                    # ML API server
 │   └── ml_api_server.py   # Flask API for predictions
 ├── config/                 # Configuration files
-│   ├── outlook_config.json.example
-│   ├── training_config.json
-│   └── n8n_config.json
+│   ├── imap_config.json.example
+│   └── training_config.json
 ├── data/                   # Data storage (gitignored)
-│   ├── processed_emails/  # Emails collected by n8n
+│   ├── processed_emails/  # Emails collected from IMAP
 │   ├── attachments/        # Downloaded attachments
 │   └── labeled_emails.json # Labeled training data
 ├── ml_training/            # ML training scripts
@@ -29,33 +28,27 @@ This project uses **n8n** for workflow automation to read and process Outlook em
 ├── models/                 # Trained models (gitignored)
 │   └── email_classifier.pkl
 ├── scripts/                # Utility scripts
+│   ├── imap_email_reader.py
+│   ├── smtp_email_writer.py
 │   ├── process_attachments.py
 │   └── label_emails.py
 ├── utils/                  # Utility modules
 │   └── attachment_processor.py
-├── workflows/              # n8n workflow configurations
-│   └── outlook_email_processor.json
 ├── requirements.txt        # Python dependencies
 └── README.md
 ```
 
 ## Prerequisites
 
-1. **Node.js and n8n**
-   ```bash
-   npm install -g n8n
-   ```
-
-2. **Python 3.8+**
+1. **Python 3.8+**
    ```bash
    python --version  # Should be 3.8 or higher
    ```
 
-3. **Microsoft Outlook API Access**
-   - Azure App Registration
-   - Client ID and Client Secret
-   - Tenant ID
-   - Required permissions: `Mail.Read`, `Mail.ReadWrite`, `Files.Read`
+2. **Email Account with IMAP Access**
+   - Gmail, Outlook.com, or any IMAP-compatible provider
+   - For Gmail: Enable 2FA and generate an App Password
+   - For Outlook.com: Enable IMAP in account settings
 
 ## Installation
 
@@ -66,25 +59,32 @@ This project uses **n8n** for workflow automation to read and process Outlook em
 pip install -r requirements.txt
 ```
 
-### 2. Configure Outlook API
+### 2. Configure Email Access (IMAP)
 
-1. Go to [Azure Portal](https://portal.azure.com)
-2. Navigate to **Azure Active Directory** > **App registrations**
-3. Create a new app registration
-4. Add API permissions:
-   - `Microsoft Graph` > `Mail.Read`
-   - `Microsoft Graph` > `Mail.ReadWrite`
-   - `Microsoft Graph` > `Files.Read`
-5. Create a client secret
-6. Copy `config/outlook_config.json.example` to `config/outlook_config.json`
-7. Fill in your credentials:
+1. Copy the example config:
+   ```bash
+   cp config/imap_config.json.example config/imap_config.json
+   ```
+
+2. Edit `config/imap_config.json` with your email credentials:
    ```json
    {
-     "client_id": "your-client-id",
-     "client_secret": "your-client-secret",
-     "tenant_id": "your-tenant-id"
+     "imap_server": "imap.gmail.com",
+     "imap_port": 993,
+     "smtp_server": "smtp.gmail.com",
+     "smtp_port": 587,
+     "use_tls": true,
+     "username": "your-email@gmail.com",
+     "password": "your-app-password"
    }
    ```
+
+3. **For Gmail users:**
+   - Enable 2-Factor Authentication
+   - Generate an App Password: https://myaccount.google.com/apppasswords
+   - Use the App Password (not your regular password)
+
+4. See `IMAP_SETUP.md` for detailed setup instructions for different providers.
 
 ### 3. Configure Training Settings
 
@@ -93,18 +93,7 @@ Edit `config/training_config.json` to customize:
 - Text vectorization settings
 - Attachment processing options
 
-### 4. Start n8n
-
-```bash
-n8n start
-```
-
-Navigate to `http://localhost:5678` and:
-1. Import the workflow from `workflows/outlook_email_processor.json`
-2. Configure Outlook OAuth2 credentials in n8n
-3. Test the workflow
-
-### 5. Start ML API Server
+### 4. Start ML API Server
 
 ```bash
 python api/ml_api_server.py
@@ -114,19 +103,27 @@ The API will run on `http://localhost:5000`
 
 ## Usage
 
-### Workflow: Collecting and Processing Emails
+### Collecting and Processing Emails
 
-1. **Start n8n workflow**: The workflow will automatically:
-   - Monitor your Outlook inbox
-   - Download new emails
-   - Download and save attachments
-   - Process email data
-   - Call ML API for predictions
-   - Save processed emails to `data/processed_emails/`
+1. **Read emails from your inbox**:
+   ```bash
+   # Fetch last 50 emails with attachments
+   python scripts/imap_email_reader.py --limit 50 --download-attachments
+   
+   # Fetch emails since a specific date
+   python scripts/imap_email_reader.py --since 01-Jan-2024 --download-attachments
+   ```
+   
+   This will save emails to `data/processed_emails/` in JSON format.
 
-2. **Process attachments** (optional, if not done automatically):
+2. **Process attachments** (if not downloaded automatically):
    ```bash
    python scripts/process_attachments.py --emails data/processed_emails
+   ```
+
+3. **Send emails** (optional):
+   ```bash
+   python scripts/smtp_email_writer.py --to recipient@example.com --subject "Test" --body "Hello"
    ```
 
 ### Training the Model
@@ -147,7 +144,7 @@ The API will run on `http://localhost:5000`
 
 ### Using Predictions
 
-The n8n workflow automatically calls the ML API for each email. You can also:
+You can use the ML API to predict labels for emails:
 
 1. **Use the API directly**:
    ```bash
@@ -256,17 +253,30 @@ GET /api/model/info
 - `training`: Train/test split and validation settings
 - `attachment_processing`: Attachment extraction options
 
-### n8n Configuration (`config/n8n_config.json`)
+### IMAP Configuration (`config/imap_config.json`)
 
-- `workflow`: Polling interval and processing options
-- `api`: ML API endpoint settings
-- `storage`: Data storage paths
+- `imap_server`: IMAP server address (e.g., imap.gmail.com)
+- `imap_port`: IMAP port (usually 993)
+- `smtp_server`: SMTP server address (e.g., smtp.gmail.com)
+- `smtp_port`: SMTP port (usually 587)
+- `username`: Your email address
+- `password`: Your email password or App Password
 
 ## Troubleshooting
 
-### n8n Workflow Issues
+### Email Access Issues
 
-- **OAuth2 not working**: Ensure credentials are correctly configured in n8n
+- **IMAP connection error**: 
+  - Verify your email and password are correct
+  - For Gmail: Make sure you're using an App Password, not your regular password
+  - Check that IMAP is enabled in your email account settings
+  - Verify the IMAP server address and port are correct for your provider
+
+- **SMTP sending fails**:
+  - Check SMTP server settings match your email provider
+  - Ensure TLS/SSL settings are correct (usually TLS for port 587)
+  - For Gmail: Use App Password, not regular password
+
 - **Attachments not downloading**: Check file permissions and disk space
 - **API calls failing**: Ensure ML API server is running on port 5000
 

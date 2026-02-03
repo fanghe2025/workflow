@@ -1,8 +1,8 @@
 """
-SMTP Email Writer - Send emails without Azure credentials
+SMTP Email Writer
 
 This script sends emails using SMTP protocol, which works with most email providers
-(Gmail, Outlook.com, Yahoo, etc.) without requiring Azure credentials.
+(Gmail, Outlook.com, etc.).
 
 Usage:
     python scripts/smtp_email_writer.py --config config/imap_config.json --to recipient@example.com --subject "Test" --body "Email body"

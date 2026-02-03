@@ -1,8 +1,8 @@
 """
-IMAP Email Reader - Alternative to Azure Outlook API
+IMAP Email Reader
 
 This script reads emails using IMAP protocol, which works with most email providers
-(Gmail, Outlook.com, Yahoo, etc.) without requiring Azure credentials.
+(Gmail, Outlook.com, etc.).
 
 Usage:
     python scripts/imap_email_reader.py --config config/imap_config.json
