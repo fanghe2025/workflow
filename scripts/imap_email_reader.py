@@ -197,9 +197,44 @@ def connect_imap(config: Dict[str, Any]) -> imaplib.IMAP4_SSL:
         raise ValueError("Missing required IMAP configuration: server, username, password")
     
     print(f"Connecting to {server}:{port}...")
-    mail = imaplib.IMAP4_SSL(server, port)
-    mail.login(username, password)
-    print("Connected successfully!")
+    print(f"Username: {username}")
+    
+    try:
+        mail = imaplib.IMAP4_SSL(server, port)
+    except Exception as e:
+        print(f"\n❌ Connection failed: {e}")
+        print("\nTroubleshooting:")
+        print("1. Check that IMAP is enabled in Outlook.com settings")
+        print("2. Verify the server address is correct (outlook.office365.com)")
+        print("3. Check your firewall/network settings")
+        raise
+    
+    try:
+        mail.login(username, password)
+        print("✅ Connected successfully!")
+    except imaplib.IMAP4.error as e:
+        error_msg = str(e)
+        print(f"\n❌ LOGIN failed: {error_msg}")
+        print("\nCommon causes and solutions:")
+        print("1. **IMAP not enabled**:")
+        print("   - Go to https://outlook.live.com/mail")
+        print("   - Settings (gear icon) > Mail > Sync email")
+        print("   - Enable 'IMAP access'")
+        print()
+        print("2. **Need App Password**:")
+        print("   - If you have 2FA enabled, you need an App Password")
+        print("   - Go to https://account.microsoft.com/security")
+        print("   - Under 'App passwords', create a new app password")
+        print("   - Use the generated password (not your regular password)")
+        print()
+        print("3. **Modern Authentication**:")
+        print("   - Some Office 365 accounts require App Passwords")
+        print("   - Try generating an App Password even without 2FA")
+        print()
+        print("4. **Wrong credentials**:")
+        print("   - Double-check your email address and password")
+        print("   - Make sure there are no extra spaces")
+        raise ValueError(f"IMAP authentication failed: {error_msg}")
     
     return mail
 

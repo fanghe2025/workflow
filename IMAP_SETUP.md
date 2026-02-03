@@ -98,10 +98,32 @@ The IMAP reader saves emails in the same JSON format, so they work seamlessly wi
 
 ### Connection Errors
 
-- **"Authentication failed"**: 
-  - Verify your Outlook email and password are correct
-  - Some Office 365 accounts require an App Password instead of your regular password
-  - Check that IMAP is enabled in Outlook.com settings
+- **"LOGIN failed" or "Authentication failed"**: 
+  This is the most common error. Follow these steps:
+  
+  1. **Enable IMAP in Outlook**:
+     - Go to https://outlook.live.com/mail
+     - Click the gear icon (Settings) in the top right
+     - Go to **Mail** > **Sync email**
+     - Under "IMAP access", toggle it **ON**
+     - Save changes and wait a few minutes for settings to propagate
+  
+  2. **Use App Password** (if 2FA is enabled or if regular password doesn't work):
+     - Go to https://account.microsoft.com/security
+     - Sign in with your Microsoft account
+     - Under "App passwords", click "Create a new app password"
+     - Give it a name (e.g., "Email Workflow")
+     - Copy the generated 16-character password
+     - Use this password in your `imap_config.json` (not your regular password)
+  
+  3. **Verify credentials**:
+     - Double-check your email address is correct
+     - Make sure there are no extra spaces in username or password
+     - Try logging into Outlook.com web interface to verify your password works
+  
+  4. **Modern Authentication**:
+     - Some Office 365 accounts require App Passwords even without 2FA
+     - Try generating an App Password as a workaround
 
 - **"Connection refused"**:
   - Verify IMAP server is set to `outlook.office365.com` and port `993`
