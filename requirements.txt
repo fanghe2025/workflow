@@ -29,3 +29,6 @@ requests==2.31.0
 
 # Microsoft Graph API
 msal==1.28.0
+
+# Database
+duckdb==0.10.0
