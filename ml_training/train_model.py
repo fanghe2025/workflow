@@ -68,7 +68,7 @@ class EmailLabelingModel:
             # Combine subject and body (support both 'body' and 'body_content' keys)
             subject = email.get("subject", "")
             body = email.get("body_content", email.get("body", ""))
-            
+
             text_parts = [subject, body]
 
             # Add attachment text if available
@@ -190,14 +190,36 @@ class EmailLabelingModel:
         training_config = self.config.get("training", {})
         test_size = training_config.get("test_size", 0.2)
         random_state = training_config.get("random_state", 42)
-        stratify = y if training_config.get("stratify", True) else None
+
+        # Check if stratification is possible (each class needs at least 2 samples)
+        stratify = None
+        if training_config.get("stratify", True):
+            from collections import Counter
+
+            label_counts = Counter(labels)
+            min_samples_per_class = min(label_counts.values())
+
+            if min_samples_per_class >= 2:
+                stratify = y
+                print(
+                    f"Using stratified split (min samples per class: {min_samples_per_class})"
+                )
+            else:
+                print(
+                    f"Warning: Cannot use stratified split. Some classes have only {min_samples_per_class} sample(s)."
+                )
+                print(f"Label distribution: {dict(label_counts)}")
+                print("Using non-stratified split instead.")
 
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=test_size, random_state=random_state, stratify=stratify
         )
 
         # Train model
-        print(f"\nTraining model on {len(X_train)} samples...")
+        n_train_samples = (
+            X_train.shape[0] if hasattr(X_train, "shape") else len(X_train)
+        )
+        print(f"\nTraining model on {n_train_samples} samples...")
         self.model.fit(X_train, y_train)
 
         # Evaluate
@@ -206,13 +228,17 @@ class EmailLabelingModel:
 
         print(f"\nModel Accuracy: {accuracy:.4f}")
         print("\nClassification Report:")
+
+        # Get unique classes present in test set
+        unique_test_classes = sorted(set(y_test) | set(y_pred))
+        target_names = [self.reverse_label_encoder[i] for i in unique_test_classes]
+
         print(
             classification_report(
                 y_test,
                 y_pred,
-                target_names=[
-                    self.reverse_label_encoder[i] for i in range(len(unique_labels))
-                ],
+                labels=unique_test_classes,
+                target_names=target_names,
             )
         )
 
@@ -260,13 +286,17 @@ class EmailLabelingModel:
         label = self.reverse_label_encoder[prediction_idx]
         confidence = float(max(probabilities))
 
+        # Convert all probabilities to native Python types for JSON serialization
+        all_probs = {}
+        for i, prob in enumerate(probabilities):
+            label_name = self.reverse_label_encoder[i]
+            # Ensure it's a native Python float
+            all_probs[label_name] = float(prob)
+
         return {
-            "label": label,
-            "confidence": confidence,
-            "all_probabilities": {
-                self.reverse_label_encoder[i]: float(prob)
-                for i, prob in enumerate(probabilities)
-            },
+            "label": str(label),
+            "confidence": float(confidence),
+            "all_probabilities": all_probs,
         }
 
     def save(self):
@@ -302,11 +332,11 @@ def load_labeled_emails(
 ) -> List[Dict[str, Any]]:
     """
     Load labeled emails from DuckDB or JSON file
-    
+
     Args:
         data_path: Path to JSON file (legacy support)
         db_path: Path to DuckDB database file
-    
+
     Returns:
         List of labeled email dictionaries
     """
@@ -315,52 +345,87 @@ def load_labeled_emails(
         if not os.path.exists(db_path):
             print(f"Warning: DuckDB file not found: {db_path}")
             return []
-        
+
         conn = duckdb.connect(db_path)
         try:
-            # Query emails that have labels (tags field)
+            # Query emails that have labels (tags or additional_tags field)
+            # Combine tags and additional_tags for training
             query = """
             SELECT 
                 email_id,
                 subject,
                 body_content,
                 from_email,
-                tags as label,
+                tags,
+                additional_tags,
                 has_attachments,
                 received_at
             FROM emails
-            WHERE tags IS NOT NULL AND tags != ''
+            WHERE (tags IS NOT NULL AND tags != '') 
+               OR (additional_tags IS NOT NULL AND additional_tags != '')
             """
             result = conn.execute(query).fetchall()
-            columns = ["email_id", "subject", "body_content", "from", "label", "hasAttachments", "received_at"]
-            
+            columns = [
+                "email_id",
+                "subject",
+                "body_content",
+                "from",
+                "tags",
+                "additional_tags",
+                "hasAttachments",
+                "received_at",
+            ]
+
             emails = []
             for row in result:
                 email_dict = dict(zip(columns, row))
                 # Convert hasAttachments boolean
-                email_dict["hasAttachments"] = bool(email_dict.get("hasAttachments", False))
+                email_dict["hasAttachments"] = bool(
+                    email_dict.get("hasAttachments", False)
+                )
                 # Ensure body key exists for compatibility
                 email_dict["body"] = email_dict.get("body_content", "")
-                emails.append(email_dict)
-            
+                
+                # Combine tags and additional_tags for label
+                tags = email_dict.get("tags", "") or ""
+                additional_tags = email_dict.get("additional_tags", "") or ""
+                
+                # Combine both tags (comma-separated)
+                combined_tags = []
+                if tags:
+                    combined_tags.append(tags)
+                if additional_tags:
+                    combined_tags.append(additional_tags)
+                
+                # Use combined tags as label
+                email_dict["label"] = ", ".join(combined_tags) if combined_tags else None
+                
+                # Remove individual tag fields to avoid confusion
+                email_dict.pop("tags", None)
+                email_dict.pop("additional_tags", None)
+                
+                # Only include emails with valid labels
+                if email_dict.get("label"):
+                    emails.append(email_dict)
+
             print(f"Loaded {len(emails)} labeled emails from DuckDB")
             return emails
         finally:
             conn.close()
-    
+
     # Fallback to JSON file
     if data_path and os.path.exists(data_path):
         with open(data_path, "r", encoding="utf-8") as f:
             emails = json.load(f)
             print(f"Loaded {len(emails)} labeled emails from JSON")
             return emails
-    
+
     if data_path:
         print(f"Warning: {data_path} not found. Creating empty file.")
         os.makedirs(os.path.dirname(data_path), exist_ok=True)
         with open(data_path, "w") as f:
             json.dump([], f)
-    
+
     return []
 
 
@@ -389,7 +454,7 @@ def main():
     print("Loading labeled emails...")
     labeled_emails = load_labeled_emails(
         data_path=labeled_data_path if not os.path.exists(db_path) else None,
-        db_path=db_path if os.path.exists(db_path) else None
+        db_path=db_path if os.path.exists(db_path) else None,
     )
 
     if not labeled_emails:

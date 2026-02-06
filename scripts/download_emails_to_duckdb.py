@@ -12,17 +12,16 @@ import os
 import sys
 import json
 import logging
-import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 import duckdb
 import requests
-from bs4 import BeautifulSoup
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scripts.graph_email_tagger import GraphEmailTagger, load_config
+from scripts.common import html_to_text
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -77,6 +76,7 @@ class EmailDownloader:
             body_content TEXT,
             body_content_type VARCHAR,
             tags VARCHAR,
+            additional_tags VARCHAR,
             has_attachments BOOLEAN,
             received_at TIMESTAMP,
             raw_json TEXT,
@@ -152,7 +152,6 @@ class EmailDownloader:
                     break
 
                 all_emails.extend(emails)
-                logger.info(f"Retrieved {len(emails)} emails (total: {len(all_emails)})")
 
                 # Check if there are more emails using nextLink
                 next_link = data.get("@odata.nextLink")
@@ -271,22 +270,22 @@ class EmailDownloader:
         """
         try:
             attachment_id = attachment.get("id")
-            
+
             if not attachment_id:
                 logger.error("Attachment ID is missing")
                 return False
-            
+
             if not email_id:
                 logger.error("Email ID is missing for attachment")
                 return False
-            
+
             # Verify email exists before inserting attachment (foreign key constraint)
             check_email = "SELECT email_id FROM emails WHERE email_id = ?"
             email_exists = self.conn.execute(check_email, [email_id]).fetchone()
             if not email_exists:
                 logger.error(f"Email {email_id} does not exist in database. Cannot insert attachment.")
                 return False
-            
+
             insert_sql = """
             INSERT OR REPLACE INTO attachments (
                 email_id, attachment_id, name, content_type, size, file_path
@@ -306,8 +305,6 @@ class EmailDownloader:
             return True
         except Exception as e:
             logger.error(f"Error storing attachment {attachment.get('id', 'unknown')}: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
             return False
 
     def download_and_store_attachments(self, email_id: str, message_id: str) -> int:
@@ -371,30 +368,6 @@ class EmailDownloader:
 
         return stored_count
 
-    def html_to_text(self, html_content: str) -> str:
-        """
-        Convert HTML content to plain text
-
-        Args:
-            html_content: HTML string
-
-        Returns:
-            Plain text string
-        """
-        if not html_content:
-            return ""
-        
-        try:
-            soup = BeautifulSoup(html_content, "html.parser")
-            # Get text and clean up whitespace
-            text = soup.get_text(separator=" ", strip=True)
-            # Normalize multiple spaces/newlines to single spaces
-            text = re.sub(r'\s+', ' ', text)
-            return text.strip()
-        except Exception as e:
-            logger.warning(f"Error converting HTML to text: {e}, returning original content")
-            return html_content
-
     def store_email(self, email: Dict[str, Any]) -> Tuple[bool, int]:
         """
         Store email in DuckDB
@@ -413,7 +386,7 @@ class EmailDownloader:
 
             # Convert HTML to plain text if needed
             if body_content_type.lower() == "html" and body_content:
-                body_content = self.html_to_text(body_content)
+                body_content = html_to_text(body_content)
                 body_content_type = "text"  # Update type to text after conversion
 
             # Extract from address
@@ -503,7 +476,12 @@ class EmailDownloader:
             return {"downloaded": 0, "stored": 0, "errors": 0, "attachments": 0}
 
         # Store emails
-        results = {"downloaded": len(emails), "stored": 0, "errors": 0, "attachments": 0}
+        results = {
+            "downloaded": len(emails),
+            "stored": 0,
+            "errors": 0,
+            "attachments": 0,
+        }
 
         logger.info(f"Storing {len(emails)} emails in DuckDB...")
         for i, email in enumerate(emails, 1):

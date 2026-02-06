@@ -84,10 +84,18 @@ class Attachment(BaseModel):
 class EmailRequest(BaseModel):
     subject: Optional[str] = Field(default="", description="Email subject")
     body: Optional[str] = Field(default="", description="Email body content")
-    from_: Optional[str] = Field(default="", alias="from", description="Sender email address")
-    hasAttachments: Optional[bool] = Field(default=False, description="Whether email has attachments")
-    attachments: Optional[List[Attachment]] = Field(default_factory=list, description="Email attachments")
-    importance: Optional[str] = Field(default="normal", description="Email importance level")
+    from_: Optional[str] = Field(
+        default="", alias="from", description="Sender email address"
+    )
+    hasAttachments: Optional[bool] = Field(
+        default=False, description="Whether email has attachments"
+    )
+    attachments: Optional[List[Attachment]] = Field(
+        default_factory=list, description="Email attachments"
+    )
+    importance: Optional[str] = Field(
+        default="normal", description="Email importance level"
+    )
     id: Optional[str] = Field(default=None, description="Email ID")
 
     class Config:
@@ -97,7 +105,9 @@ class EmailRequest(BaseModel):
 class PredictionResponse(BaseModel):
     label: str = Field(description="Predicted label")
     confidence: float = Field(description="Prediction confidence score")
-    all_probabilities: Dict[str, float] = Field(description="Probabilities for all labels")
+    all_probabilities: Dict[str, float] = Field(
+        description="Probabilities for all labels"
+    )
 
 
 class BatchEmailRequest(BaseModel):
@@ -113,7 +123,9 @@ class BatchPredictionItem(BaseModel):
 
 
 class BatchPredictionResponse(BaseModel):
-    predictions: List[BatchPredictionItem] = Field(description="Predictions for all emails")
+    predictions: List[BatchPredictionItem] = Field(
+        description="Predictions for all emails"
+    )
 
 
 class HealthResponse(BaseModel):
@@ -135,8 +147,7 @@ class ErrorResponse(BaseModel):
 async def health():
     """Health check endpoint"""
     return HealthResponse(
-        status="healthy",
-        model_loaded=model is not None and model.is_trained
+        status="healthy", model_loaded=model is not None and model.is_trained
     )
 
 
@@ -146,7 +157,7 @@ async def predict(email: EmailRequest):
     if model is None or not model.is_trained:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Model not loaded or not trained"
+            detail="Model not loaded or not trained",
         )
 
     try:
@@ -154,7 +165,7 @@ async def predict(email: EmailRequest):
         if not email.subject and not email.body:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email must have at least subject or body"
+                detail="Email must have at least subject or body",
             )
 
         # Convert Pydantic model to dict for model.predict()
@@ -162,7 +173,7 @@ async def predict(email: EmailRequest):
         # Ensure 'from' key is present (not 'from_')
         if "from_" in email_dict:
             email_dict["from"] = email_dict.pop("from_")
-        
+
         # Map 'body' to 'body_content' for consistency with DuckDB schema
         if "body" in email_dict and "body_content" not in email_dict:
             email_dict["body_content"] = email_dict["body"]
@@ -170,25 +181,42 @@ async def predict(email: EmailRequest):
         # Predict
         prediction = model.predict(email_dict)
 
-        return PredictionResponse(**prediction)
+        # Ensure all values are JSON serializable (convert numpy types to native Python types)
+        prediction_clean = {
+            "label": str(prediction.get("label", "")),
+            "confidence": float(prediction.get("confidence", 0.0)),
+            "all_probabilities": {
+                str(k): float(v)
+                for k, v in prediction.get("all_probabilities", {}).items()
+            },
+        }
+
+        return PredictionResponse(**prediction_clean)
 
     except HTTPException:
         raise
+    except ValueError as e:
+        logger.error(f"Value error during prediction: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid input: {str(e)}"
+        )
     except Exception as e:
-        logger.error(f"Error during prediction: {e}")
+        logger.error(f"Error during prediction: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail=f"Prediction error: {str(e)}",
         )
 
 
-@app.post("/api/predict/batch", response_model=BatchPredictionResponse, tags=["Predictions"])
+@app.post(
+    "/api/predict/batch", response_model=BatchPredictionResponse, tags=["Predictions"]
+)
 async def predict_batch(batch_request: BatchEmailRequest):
     """Predict labels for multiple emails"""
     if model is None or not model.is_trained:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Model not loaded or not trained"
+            detail="Model not loaded or not trained",
         )
 
     try:
@@ -199,36 +227,25 @@ async def predict_batch(batch_request: BatchEmailRequest):
                 email_dict = email.model_dump(by_alias=True, exclude_none=True)
                 if "from_" in email_dict:
                     email_dict["from"] = email_dict.pop("from_")
-                
+
                 # Map 'body' to 'body_content' for consistency with DuckDB schema
                 if "body" in email_dict and "body_content" not in email_dict:
                     email_dict["body_content"] = email_dict["body"]
 
                 prediction = model.predict(email_dict)
-                predictions.append(
-                    BatchPredictionItem(
-                        email_id=email.id,
-                        **prediction
-                    )
-                )
+                predictions.append(BatchPredictionItem(email_id=email.id, **prediction))
             except Exception as e:
                 logger.warning(
                     f"Error predicting for email {email.id or 'unknown'}: {e}"
                 )
-                predictions.append(
-                    BatchPredictionItem(
-                        email_id=email.id,
-                        error=str(e)
-                    )
-                )
+                predictions.append(BatchPredictionItem(email_id=email.id, error=str(e)))
 
         return BatchPredictionResponse(predictions=predictions)
 
     except Exception as e:
         logger.error(f"Error during batch prediction: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
         )
 
 
@@ -238,7 +255,7 @@ async def model_info():
     if model is None or not model.is_trained:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Model not loaded or not trained"
+            detail="Model not loaded or not trained",
         )
 
     return ModelInfoResponse(
@@ -258,7 +275,7 @@ async def startup_event():
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     # Load model before starting server
     logger.info("Starting ML API server...")
     if load_model():
