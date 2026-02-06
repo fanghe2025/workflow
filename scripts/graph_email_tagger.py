@@ -10,7 +10,6 @@ This script uses Microsoft Graph API to:
 import os
 import sys
 import json
-import argparse
 import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -34,6 +33,8 @@ class GraphEmailTagger:
         client_id: str,
         client_secret: Optional[str] = None,
         tenant_id: Optional[str] = None,
+        authority_url: Optional[str] = None,
+        user_principal_name: Optional[str] = None,
         ml_api_url: str = "http://localhost:5000",
     ):
         """
@@ -42,32 +43,71 @@ class GraphEmailTagger:
         Args:
             client_id: Azure AD application (client) ID
             client_secret: Azure AD application secret (for app-only auth)
-            tenant_id: Azure AD tenant ID (for app-only auth)
+            tenant_id: Azure AD tenant ID or tenant domain (for app-only auth)
+            authority_url: Full Entra ID authority URL (e.g., https://login.microsoftonline.com/{tenant_id})
+                          If provided, takes precedence over tenant_id
+            user_principal_name: User email/UPN for app-only auth (required when using client_secret)
             ml_api_url: URL of the ML API server for predictions
         """
         self.client_id = client_id
         self.client_secret = client_secret
         self.tenant_id = tenant_id
+        self.user_principal_name = user_principal_name
         self.ml_api_url = ml_api_url
         self.access_token = None
         self.graph_endpoint = "https://graph.microsoft.com/v1.0"
 
+        # Determine authority URL for modern Entra ID authentication
+        if authority_url:
+            # Use provided full authority URL (modern Entra ID format)
+            authority = authority_url
+        elif tenant_id:
+            # Build authority URL from tenant ID (supports both GUID and tenant domain)
+            if tenant_id.startswith("https://"):
+                # Already a full URL
+                authority = tenant_id
+            else:
+                # Modern Entra ID single-tenant authority format
+                authority = f"https://login.microsoftonline.com/{tenant_id}"
+        else:
+            # Default to common endpoint for multi-tenant
+            authority = "https://login.microsoftonline.com/common"
+
         # Initialize MSAL app
-        if client_secret and tenant_id:
-            # App-only authentication (service principal)
+        if client_secret:
+            # App-only authentication (service principal) - modern client credential flow
             self.app = ConfidentialClientApplication(
                 client_id=client_id,
                 client_credential=client_secret,
-                authority=f"https://login.microsoftonline.com/{tenant_id}",
+                authority=authority,
             )
             self.auth_type = "app_only"
         else:
             # Interactive authentication (delegated permissions)
             self.app = PublicClientApplication(
                 client_id=client_id,
-                authority="https://login.microsoftonline.com/common",
+                authority=authority,
             )
             self.auth_type = "delegated"
+
+    def _get_user_endpoint_base(self) -> str:
+        """
+        Get the correct endpoint base based on authentication type.
+        For app-only auth, use /users/{userPrincipalName}/ instead of /me/
+        User principal name is URL-encoded to handle special characters.
+        
+        Returns:
+            Endpoint base string (e.g., "/me" or "/users/user%40domain.com")
+        """
+        if self.auth_type == "app_only":
+            if not self.user_principal_name:
+                raise ValueError(
+                    "user_principal_name is required for app-only authentication. "
+                    "Provide the email address of the user whose mailbox to access."
+                )
+            return f"/users/{self.user_principal_name}"
+        else:
+            return "/me"
 
     def authenticate(self, scopes: List[str] = None) -> bool:
         """
@@ -84,8 +124,8 @@ class GraphEmailTagger:
 
         try:
             if self.auth_type == "app_only":
-                # App-only authentication
-                result = self.app.acquire_token_for_client(scopes=scopes)
+                # App-only authentication - must use .default scope for client credential flows
+                result = self.app.acquire_token_for_client(scopes=["https://graph.microsoft.com/.default"])
             else:
                 # Interactive authentication
                 accounts = self.app.get_accounts()
@@ -137,10 +177,11 @@ class GraphEmailTagger:
         Returns:
             List of email dictionaries
         """
-        url = f"{self.graph_endpoint}/me/mailFolders/{folder}/messages"
+        endpoint_base = self._get_user_endpoint_base()
+        url = f"{self.graph_endpoint}{endpoint_base}/mailFolders/{folder}/messages"
         params = {
             "$top": limit,
-            "$select": "id,subject,from,toRecipients,body,receivedDateTime,hasAttachments,importance,categories",
+            "$select": "id,subject,from,toRecipients,body,conversationId,receivedDateTime,hasAttachments,importance,categories",
             "$orderby": "receivedDateTime desc",
         }
 
@@ -148,6 +189,7 @@ class GraphEmailTagger:
             params["$filter"] = filter_query
 
         try:
+            logger.debug(f"Requesting URL: {url}")
             response = requests.get(url, headers=self.get_headers(), params=params)
             response.raise_for_status()
             data = response.json()
@@ -155,9 +197,25 @@ class GraphEmailTagger:
 
             logger.info(f"Retrieved {len(emails)} emails from {folder}")
             return emails
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"HTTP error reading emails: {e}")
+            logger.error(f"Request URL: {url}")
+            if e.response is not None:
+                logger.error(f"Status code: {e.response.status_code}")
+                logger.error(f"Response: {e.response.text}")
+                try:
+                    error_data = e.response.json()
+                    if "error" in error_data:
+                        error_info = error_data["error"]
+                        logger.error(f"Error code: {error_info.get('code')}")
+                        logger.error(f"Error message: {error_info.get('message')}")
+                except:
+                    pass
+            return []
         except requests.exceptions.RequestException as e:
             logger.error(f"Error reading emails: {e}")
-            if hasattr(e.response, "text"):
+            logger.error(f"Request URL: {url}")
+            if hasattr(e, "response") and e.response is not None:
                 logger.error(f"Response: {e.response.text}")
             return []
 
@@ -171,7 +229,8 @@ class GraphEmailTagger:
         Returns:
             List of attachment dictionaries
         """
-        url = f"{self.graph_endpoint}/me/messages/{message_id}/attachments"
+        endpoint_base = self._get_user_endpoint_base()
+        url = f"{self.graph_endpoint}{endpoint_base}/messages/{message_id}/attachments"
         try:
             response = requests.get(url, headers=self.get_headers())
             response.raise_for_status()
@@ -246,7 +305,8 @@ class GraphEmailTagger:
             True if successful, False otherwise
         """
         # First, get current categories
-        url = f"{self.graph_endpoint}/me/messages/{message_id}"
+        endpoint_base = self._get_user_endpoint_base()
+        url = f"{self.graph_endpoint}{endpoint_base}/messages/{message_id}"
         try:
             response = requests.get(url, headers=self.get_headers())
             response.raise_for_status()
@@ -360,90 +420,35 @@ def load_config(config_path: str = "config/graph_config.json") -> Dict[str, Any]
 
 def main():
     """Main function"""
-    parser = argparse.ArgumentParser(
-        description="Read emails from Microsoft Graph API and add tags using ML model"
-    )
-    parser.add_argument(
-        "--client-id",
-        type=str,
-        help="Azure AD application (client) ID",
-    )
-    parser.add_argument(
-        "--client-secret",
-        type=str,
-        help="Azure AD application secret (for app-only auth)",
-    )
-    parser.add_argument(
-        "--tenant-id",
-        type=str,
-        help="Azure AD tenant ID (for app-only auth)",
-    )
-    parser.add_argument(
-        "--ml-api-url",
-        type=str,
-        default="http://localhost:5000",
-        help="ML API server URL (default: http://localhost:5000)",
-    )
-    parser.add_argument(
-        "--folder",
-        type=str,
-        default="inbox",
-        help="Mail folder to process (default: inbox)",
-    )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=10,
-        help="Maximum number of emails to process (default: 10)",
-    )
-    parser.add_argument(
-        "--filter",
-        type=str,
-        help="OData filter query (e.g., 'receivedDateTime ge 2024-01-01T00:00:00Z')",
-    )
-    parser.add_argument(
-        "--min-confidence",
-        type=float,
-        default=0.5,
-        help="Minimum confidence threshold for adding tags (default: 0.5)",
-    )
-    parser.add_argument(
-        "--config",
-        type=str,
-        default="config/graph_config.json",
-        help="Path to configuration file (default: config/graph_config.json)",
-    )
-
-    args = parser.parse_args()
-
     # Load config
-    config = load_config(args.config)
+    config = load_config("config/graph_config.json")
 
-    # Get credentials from args or config
-    client_id = args.client_id or config.get("client_id") or os.getenv("GRAPH_CLIENT_ID")
-    client_secret = (
-        args.client_secret
-        or config.get("client_secret")
-        or os.getenv("GRAPH_CLIENT_SECRET")
-    )
-    tenant_id = (
-        args.tenant_id or config.get("tenant_id") or os.getenv("GRAPH_TENANT_ID")
-    )
-    ml_api_url = args.ml_api_url or config.get("ml_api_url", "http://localhost:5000")
+    # Get credentials from config or environment variables
+    client_id = config.get("client_id")
+    client_secret = config.get("client_secret")
+    tenant_id = config.get("tenant_id")
+    authority_url = config.get("authority_url")
+    user_principal_name = config.get("user_principal_name")
+    ml_api_url = config.get("ml_api_url", "http://localhost:5000")
 
     if not client_id:
         logger.error(
-            "Client ID is required. Provide via --client-id, config file, or GRAPH_CLIENT_ID environment variable."
+            "Client ID is required. Provide via config file or GRAPH_CLIENT_ID environment variable."
         )
         logger.info(
             "\nTo set up Microsoft Graph API access:\n"
             "1. Go to https://portal.azure.com\n"
-            "2. Navigate to Azure Active Directory > App registrations\n"
+            "2. Navigate to Microsoft Entra ID > App registrations\n"
             "3. Create a new app registration or use existing one\n"
             "4. Note the Application (client) ID\n"
             "5. For app-only auth: Create a client secret and note the Tenant ID\n"
-            "6. Add API permissions: Mail.ReadWrite\n"
-            "7. Grant admin consent if needed\n"
+            "6. Add API permissions: Mail.ReadWrite (Application permissions)\n"
+            "7. Grant admin consent\n"
+            "\nConfig options:\n"
+            "  - tenant_id: Tenant ID (GUID) or tenant domain\n"
+            "  - authority_url: Full Entra ID authority URL (e.g., https://login.microsoftonline.com/{tenant_id})\n"
+            "    If authority_url is provided, it takes precedence over tenant_id\n"
+            "  - user_principal_name: User email/UPN (REQUIRED for app-only auth)\n"
         )
         return 1
 
@@ -452,6 +457,8 @@ def main():
         client_id=client_id,
         client_secret=client_secret,
         tenant_id=tenant_id,
+        authority_url=authority_url,
+        user_principal_name=user_principal_name,
         ml_api_url=ml_api_url,
     )
 
@@ -462,10 +469,10 @@ def main():
 
     # Process emails
     results = tagger.process_emails(
-        folder=args.folder,
-        limit=args.limit,
-        filter_query=args.filter,
-        min_confidence=args.min_confidence,
+        folder=config.get("folder", "inbox"),
+        limit=config.get("limit", 10),
+        filter_query=config.get("filter"),
+        min_confidence=config.get("min_confidence", 0.5),
     )
 
     # Print summary

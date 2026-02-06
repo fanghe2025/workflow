@@ -1,6 +1,6 @@
 # Email Workflow Automation with ML Labeling
 
-This project reads and processes Outlook emails (including attachments) using IMAP and trains a machine learning model to automatically label emails based on their content.
+This project reads and processes Outlook emails (including attachments) using Microsoft Graph API and trains a machine learning model to automatically label emails based on their content.
 
 ## Features
 
@@ -17,10 +17,11 @@ This project reads and processes Outlook emails (including attachments) using IM
 ├── api/                    # ML API server
 │   └── ml_api_server.py   # Flask API for predictions
 ├── config/                 # Configuration files
-│   ├── imap_config.json.example
+│   ├── graph_config.json.example
+│   ├── smtp_config.json.example
 │   └── training_config.json
 ├── data/                   # Data storage (gitignored)
-│   ├── processed_emails/  # Emails collected from IMAP
+│   ├── processed_emails/  # Emails collected from Microsoft Graph API
 │   ├── attachments/        # Downloaded attachments
 │   └── labeled_emails.json # Labeled training data
 ├── ml_training/            # ML training scripts
@@ -28,7 +29,7 @@ This project reads and processes Outlook emails (including attachments) using IM
 ├── models/                 # Trained models (gitignored)
 │   └── email_classifier.pkl
 ├── scripts/                # Utility scripts
-│   ├── imap_email_reader.py
+│   ├── graph_email_tagger.py
 │   ├── smtp_email_writer.py
 │   ├── process_attachments.py
 │   └── label_emails.py
@@ -45,10 +46,10 @@ This project reads and processes Outlook emails (including attachments) using IM
    python --version  # Should be 3.8 or higher
    ```
 
-2. **Outlook Email Account**
-   - Outlook.com or Office 365 account
-   - IMAP must be enabled in account settings
-   - Some accounts may require an App Password instead of your regular password
+2. **Microsoft 365 / Azure AD Account**
+   - Office 365 or Microsoft 365 account
+   - Azure AD app registration with Microsoft Graph API permissions
+   - Application permissions: Mail.ReadWrite
 
 ## Installation
 
@@ -59,33 +60,32 @@ This project reads and processes Outlook emails (including attachments) using IM
 pip install -r requirements.txt
 ```
 
-### 2. Configure Email Access (IMAP)
+### 2. Configure Microsoft Graph API Access
 
 1. Copy the example config:
    ```bash
-   cp config/imap_config.json.example config/imap_config.json
+   cp config/graph_config.json.example config/graph_config.json
    ```
 
-2. Edit `config/imap_config.json` with your Outlook credentials:
+2. Edit `config/graph_config.json` with your Azure AD app credentials:
    ```json
    {
-     "imap_server": "outlook.office365.com",
-     "imap_port": 993,
-     "smtp_server": "smtp.office365.com",
-     "smtp_port": 587,
-     "use_tls": true,
-     "username": "your-email@outlook.com",
-     "password": "your-password"
+     "client_id": "your-azure-ad-application-client-id",
+     "client_secret": "your-azure-ad-application-secret",
+     "tenant_id": "your-azure-ad-tenant-id",
+     "user_principal_name": "user@domain.com",
+     "ml_api_url": "http://localhost:5000"
    }
    ```
 
-3. **Enable IMAP in Outlook:**
-   - Go to Outlook.com settings
-   - Navigate to Mail > Sync email
-   - Enable IMAP access
-   - If your account requires it, generate an App Password
-
-4. See `IMAP_SETUP.md` for detailed Outlook setup instructions.
+3. **Set up Azure AD App Registration:**
+   - Go to https://portal.azure.com
+   - Navigate to Microsoft Entra ID > App registrations
+   - Create a new app registration or use existing one
+   - Note the Application (client) ID
+   - Create a client secret and note the Tenant ID
+   - Add API permissions: Mail.ReadWrite (Application permissions)
+   - Grant admin consent
 
 ### 3. Configure Training Settings
 
@@ -106,24 +106,22 @@ The API will run on `http://localhost:5000`
 
 ### Collecting and Processing Emails
 
-1. **Read emails from your inbox**:
+1. **Read and tag emails from your inbox**:
    ```bash
-   # Fetch last 50 emails with attachments
-   python scripts/imap_email_reader.py --limit 50 --download-attachments
-   
-   # Fetch emails since a specific date
-   python scripts/imap_email_reader.py --since 01-Jan-2024 --download-attachments
+   # Process emails and add ML-predicted tags
+   python scripts/graph_email_tagger.py
    ```
    
-   This will save emails to `data/processed_emails/` in JSON format.
+   This will read emails from Microsoft Graph API, predict labels using the ML model, and add tags to emails.
 
 2. **Process attachments** (if not downloaded automatically):
    ```bash
    python scripts/process_attachments.py --emails data/processed_emails
    ```
 
-3. **Send emails** (optional):
+2. **Send emails** (optional):
    ```bash
+   # First, create config/smtp_config.json from config/smtp_config.json.example
    python scripts/smtp_email_writer.py --to recipient@example.com --subject "Test" --body "Hello"
    ```
 
@@ -254,12 +252,19 @@ GET /api/model/info
 - `training`: Train/test split and validation settings
 - `attachment_processing`: Attachment extraction options
 
-### IMAP Configuration (`config/imap_config.json`)
+### Microsoft Graph Configuration (`config/graph_config.json`)
 
-- `imap_server`: IMAP server address (e.g., imap.gmail.com)
-- `imap_port`: IMAP port (usually 993)
-- `smtp_server`: SMTP server address (e.g., smtp.gmail.com)
+- `client_id`: Azure AD application (client) ID
+- `client_secret`: Azure AD application secret (for app-only auth)
+- `tenant_id`: Azure AD tenant ID
+- `user_principal_name`: User email/UPN (required for app-only auth)
+- `ml_api_url`: ML API server URL (default: http://localhost:5000)
+
+### SMTP Configuration (`config/smtp_config.json`)
+
+- `smtp_server`: SMTP server address (e.g., smtp.office365.com)
 - `smtp_port`: SMTP port (usually 587)
+- `use_tls`: Use TLS encryption (usually true)
 - `username`: Your email address
 - `password`: Your email password or App Password
 
@@ -267,16 +272,16 @@ GET /api/model/info
 
 ### Email Access Issues
 
-- **IMAP connection error**: 
-  - Verify your email and password are correct
-  - For Gmail: Make sure you're using an App Password, not your regular password
-  - Check that IMAP is enabled in your email account settings
-  - Verify the IMAP server address and port are correct for your provider
+- **Microsoft Graph API authentication error**: 
+  - Verify your client_id, client_secret, and tenant_id are correct
+  - Ensure Mail.ReadWrite application permission is granted
+  - Verify admin consent has been granted for the app
+  - Check that user_principal_name is correct and user exists in tenant
 
 - **SMTP sending fails**:
   - Check SMTP server settings match your email provider
   - Ensure TLS/SSL settings are correct (usually TLS for port 587)
-  - For Gmail: Use App Password, not regular password
+  - For Office 365: Use App Password if required
 
 - **Attachments not downloading**: Check file permissions and disk space
 - **API calls failing**: Ensure ML API server is running on port 5000

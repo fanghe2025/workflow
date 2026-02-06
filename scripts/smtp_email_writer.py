@@ -4,7 +4,7 @@ Outlook Email Writer
 This script sends Outlook emails using SMTP protocol.
 
 Usage:
-    python scripts/smtp_email_writer.py --config config/imap_config.json --to recipient@example.com --subject "Test" --body "Email body"
+    python scripts/smtp_email_writer.py --config config/smtp_config.json --to recipient@example.com --subject "Test" --body "Email body"
 """
 
 import smtplib
@@ -107,7 +107,7 @@ def main():
     parser.add_argument(
         "--config",
         type=str,
-        default="config/imap_config.json",
+        default="config/smtp_config.json",
         help="Path to email configuration file",
     )
     parser.add_argument(
@@ -161,7 +161,7 @@ def main():
     # Load configuration
     if not os.path.exists(args.config):
         print(f"Error: Configuration file not found: {args.config}")
-        print("Please create it from config/imap_config.json.example")
+        print("Please create it from config/smtp_config.json.example")
         sys.exit(1)
     
     with open(args.config, "r", encoding="utf-8") as f:
