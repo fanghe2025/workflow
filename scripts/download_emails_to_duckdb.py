@@ -74,7 +74,6 @@ class EmailDownloader:
             from_email VARCHAR,
             from_name VARCHAR,
             body_content TEXT,
-            body_content_type VARCHAR,
             tags VARCHAR,
             additional_tags VARCHAR,
             has_attachments BOOLEAN,
@@ -286,22 +285,50 @@ class EmailDownloader:
                 logger.error(f"Email {email_id} does not exist in database. Cannot insert attachment.")
                 return False
 
-            insert_sql = """
-            INSERT OR REPLACE INTO attachments (
-                email_id, attachment_id, name, content_type, size, file_path
-            ) VALUES (?, ?, ?, ?, ?, ?)
-            """
-            self.conn.execute(
-                insert_sql,
-                [
-                    email_id,
-                    attachment_id,
-                    attachment.get("name"),
-                    attachment.get("contentType"),
-                    attachment.get("size", 0),
-                    file_path,
-                ],
-            )
+            # Check if attachment already exists
+            check_sql = "SELECT attachment_id FROM attachments WHERE attachment_id = ?"
+            existing = self.conn.execute(check_sql, [attachment_id]).fetchone()
+
+            if existing:
+                # Update existing attachment
+                update_sql = """
+                UPDATE attachments SET
+                    email_id = ?,
+                    name = ?,
+                    content_type = ?,
+                    size = ?,
+                    file_path = ?
+                WHERE attachment_id = ?
+                """
+                self.conn.execute(
+                    update_sql,
+                    [
+                        email_id,
+                        attachment.get("name"),
+                        attachment.get("contentType"),
+                        attachment.get("size", 0),
+                        file_path,
+                        attachment_id,
+                    ],
+                )
+            else:
+                # Insert new attachment
+                insert_sql = """
+                INSERT INTO attachments (
+                    email_id, attachment_id, name, content_type, size, file_path
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """
+                self.conn.execute(
+                    insert_sql,
+                    [
+                        email_id,
+                        attachment_id,
+                        attachment.get("name"),
+                        attachment.get("contentType"),
+                        attachment.get("size", 0),
+                        file_path,
+                    ],
+                )
             return True
         except Exception as e:
             logger.error(f"Error storing attachment {attachment.get('id', 'unknown')}: {e}")
@@ -331,7 +358,7 @@ class EmailDownloader:
         stored_count = 0
         for attachment in attachments:
             attachment_id = attachment.get("id")
-            attachment_name = attachment.get("name", f"attachment_{attachment_id}")
+            attachment_name = attachment.get("name")
 
             # Get expected file path
             file_path_obj = self.get_attachment_file_path(email_id, attachment_id, attachment_name)
@@ -382,12 +409,10 @@ class EmailDownloader:
             # Extract body content
             body = email.get("body", {})
             body_content = body.get("content", "")
-            body_content_type = body.get("contentType", "")
 
             # Convert HTML to plain text if needed
-            if body_content_type.lower() == "html" and body_content:
+            if body.get("contentType", "") == "html" and body_content:
                 body_content = html_to_text(body_content)
-                body_content_type = "text"  # Update type to text after conversion
 
             # Extract from address
             from_info = email.get("from", {}).get("emailAddress", {})
@@ -406,29 +431,65 @@ class EmailDownloader:
 
             email_id = email.get("id")
 
-            insert_sql = """
-            INSERT OR REPLACE INTO emails (
-                email_id, thread_id, subject, from_email, from_name,
-                body_content, body_content_type, tags,
-                has_attachments, received_at, raw_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-            self.conn.execute(
-                insert_sql,
-                [
-                    email_id,
-                    email.get("conversationId"),
-                    email.get("subject"),
-                    from_email,
-                    from_name,
-                    body_content,
-                    body_content_type,
-                    tags,
-                    email.get("hasAttachments", False),
-                    received_at,
-                    raw_json,
-                ],
-            )
+            # Check if email exists to preserve additional_tags
+            check_sql = "SELECT additional_tags FROM emails WHERE email_id = ?"
+            existing = self.conn.execute(check_sql, [email_id]).fetchone()
+            additional_tags = existing[0] if existing and existing[0] else None
+
+            if existing:
+                # Update existing email (preserve additional_tags)
+                update_sql = """
+                UPDATE emails SET
+                    thread_id = ?,
+                    subject = ?,
+                    from_email = ?,
+                    from_name = ?,
+                    body_content = ?,
+                    tags = ?,
+                    has_attachments = ?,
+                    received_at = ?,
+                    raw_json = ?
+                WHERE email_id = ?
+                """
+                self.conn.execute(
+                    update_sql,
+                    [
+                        email.get("conversationId"),
+                        email.get("subject"),
+                        from_email,
+                        from_name,
+                        body_content,
+                        tags,
+                        email.get("hasAttachments", False),
+                        received_at,
+                        raw_json,
+                        email_id,
+                    ],
+                )
+            else:
+                # Insert new email
+                insert_sql = """
+                INSERT INTO emails (
+                    email_id, thread_id, subject, from_email, from_name,
+                    body_content, tags, additional_tags, has_attachments, received_at, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
+                self.conn.execute(
+                    insert_sql,
+                    [
+                        email_id,
+                        email.get("conversationId"),
+                        email.get("subject"),
+                        from_email,
+                        from_name,
+                        body_content,
+                        tags,
+                        additional_tags,  # Will be None for new emails
+                        email.get("hasAttachments", False),
+                        received_at,
+                        raw_json,
+                    ],
+                )
 
             # Commit email first to ensure it's available for foreign key constraint
             self.conn.commit()
