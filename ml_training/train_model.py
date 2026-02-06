@@ -9,13 +9,14 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, accuracy_score
 import joblib
+import duckdb
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -59,16 +60,16 @@ class EmailLabelingModel:
             else None
         )
 
-    def prepare_text_features(self, emails: List[Dict[str, Any]]) -> str:
+    def prepare_text_features(self, emails: List[Dict[str, Any]]) -> List[str]:
         """Combine all text content from email and attachments"""
         texts = []
 
         for email in emails:
-            # Combine subject and body
-            text_parts = [
-                email.get("subject", ""),
-                email.get("body", ""),
-            ]
+            # Combine subject and body (support both 'body' and 'body_content' keys)
+            subject = email.get("subject", "")
+            body = email.get("body_content", email.get("body", ""))
+            
+            text_parts = [subject, body]
 
             # Add attachment text if available
             if self.attachment_processor and email.get("attachment_texts"):
@@ -104,7 +105,8 @@ class EmailLabelingModel:
 
             # Text statistics
             subject_length = len(email.get("subject", "").split())
-            body_length = len(email.get("body", "").split())
+            body = email.get("body_content", email.get("body", ""))
+            body_length = len(body.split())
 
             # Importance
             importance = email.get("importance", "normal")
@@ -295,17 +297,71 @@ class EmailLabelingModel:
         print(f"Model loaded from {self.model_path}")
 
 
-def load_labeled_emails(data_path: str) -> List[Dict[str, Any]]:
-    """Load labeled emails from JSON file"""
-    if not os.path.exists(data_path):
+def load_labeled_emails(
+    data_path: Optional[str] = None, db_path: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Load labeled emails from DuckDB or JSON file
+    
+    Args:
+        data_path: Path to JSON file (legacy support)
+        db_path: Path to DuckDB database file
+    
+    Returns:
+        List of labeled email dictionaries
+    """
+    # Prefer DuckDB if provided
+    if db_path:
+        if not os.path.exists(db_path):
+            print(f"Warning: DuckDB file not found: {db_path}")
+            return []
+        
+        conn = duckdb.connect(db_path)
+        try:
+            # Query emails that have labels (tags field)
+            query = """
+            SELECT 
+                email_id,
+                subject,
+                body_content,
+                from_email,
+                tags as label,
+                has_attachments,
+                received_at
+            FROM emails
+            WHERE tags IS NOT NULL AND tags != ''
+            """
+            result = conn.execute(query).fetchall()
+            columns = ["email_id", "subject", "body_content", "from", "label", "hasAttachments", "received_at"]
+            
+            emails = []
+            for row in result:
+                email_dict = dict(zip(columns, row))
+                # Convert hasAttachments boolean
+                email_dict["hasAttachments"] = bool(email_dict.get("hasAttachments", False))
+                # Ensure body key exists for compatibility
+                email_dict["body"] = email_dict.get("body_content", "")
+                emails.append(email_dict)
+            
+            print(f"Loaded {len(emails)} labeled emails from DuckDB")
+            return emails
+        finally:
+            conn.close()
+    
+    # Fallback to JSON file
+    if data_path and os.path.exists(data_path):
+        with open(data_path, "r", encoding="utf-8") as f:
+            emails = json.load(f)
+            print(f"Loaded {len(emails)} labeled emails from JSON")
+            return emails
+    
+    if data_path:
         print(f"Warning: {data_path} not found. Creating empty file.")
         os.makedirs(os.path.dirname(data_path), exist_ok=True)
         with open(data_path, "w") as f:
             json.dump([], f)
-        return []
-
-    with open(data_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    
+    return []
 
 
 def main():
@@ -322,15 +378,19 @@ def main():
     # Get paths from config
     paths = config.get("paths", {})
     labeled_data_path = paths.get("labeled_data", "data/labeled_emails.json")
+    db_path = paths.get("db_path", "data/emails.duckdb")
     model_path = paths.get("model_output", "models/email_classifier.pkl")
 
     # Create directories
     Path("data").mkdir(exist_ok=True)
     Path("models").mkdir(exist_ok=True)
 
-    # Load labeled emails
+    # Load labeled emails (prefer DuckDB, fallback to JSON)
     print("Loading labeled emails...")
-    labeled_emails = load_labeled_emails(labeled_data_path)
+    labeled_emails = load_labeled_emails(
+        data_path=labeled_data_path if not os.path.exists(db_path) else None,
+        db_path=db_path if os.path.exists(db_path) else None
+    )
 
     if not labeled_emails:
         print("No labeled emails found. Please label some emails first.")

@@ -162,6 +162,10 @@ async def predict(email: EmailRequest):
         # Ensure 'from' key is present (not 'from_')
         if "from_" in email_dict:
             email_dict["from"] = email_dict.pop("from_")
+        
+        # Map 'body' to 'body_content' for consistency with DuckDB schema
+        if "body" in email_dict and "body_content" not in email_dict:
+            email_dict["body_content"] = email_dict["body"]
 
         # Predict
         prediction = model.predict(email_dict)
@@ -195,6 +199,10 @@ async def predict_batch(batch_request: BatchEmailRequest):
                 email_dict = email.model_dump(by_alias=True, exclude_none=True)
                 if "from_" in email_dict:
                     email_dict["from"] = email_dict.pop("from_")
+                
+                # Map 'body' to 'body_content' for consistency with DuckDB schema
+                if "body" in email_dict and "body_content" not in email_dict:
+                    email_dict["body_content"] = email_dict["body"]
 
                 prediction = model.predict(email_dict)
                 predictions.append(

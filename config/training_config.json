@@ -18,6 +18,7 @@
   },
   "paths": {
     "labeled_data": "data/labeled_emails.json",
+    "db_path": "data/emails.duckdb",
     "model_output": "models/email_classifier.pkl"
   },
   "attachment_processing": {
