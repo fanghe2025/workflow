@@ -182,7 +182,7 @@ class GraphEmailTagger:
         url = f"{self.graph_endpoint}{endpoint_base}/mailFolders/{folder}/messages"
         params = {
             "$top": limit,
-            "$select": "id,subject,from,body,conversationId,receivedDateTime,hasAttachments,importance,categories",
+            "$select": "id,subject,from,body,conversationId,receivedDateTime,hasAttachments,importance,categories,isRead",
             "$orderby": "receivedDateTime desc",
         }
 

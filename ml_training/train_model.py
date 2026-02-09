@@ -348,32 +348,37 @@ def load_labeled_emails(
 
         conn = duckdb.connect(db_path)
         try:
-            # Query emails that have labels (tags or additional_tags field)
-            # Combine tags and additional_tags for training
+            # Query emails with labels from threads table
+            # Tags and Additional_tags are now stored in threads table
             query = """
             SELECT 
-                email_id,
-                subject,
-                body_content,
-                from_email,
-                tags,
-                additional_tags,
-                has_attachments,
-                received_at
-            FROM emails
-            WHERE (tags IS NOT NULL AND tags != '') 
-               OR (additional_tags IS NOT NULL AND additional_tags != '')
+                e.ID,
+                e.Subject,
+                e.Message,
+                e.Sender,
+                e.Timestamp,
+                e.has_attachments,
+                t.Tags,
+                t.Additional_tags
+            FROM emails e
+            LEFT JOIN threads t ON e.ThreadID = t.ThreadID
+            WHERE (t.Tags IS NOT NULL 
+              AND t.Tags != '[]'
+              AND t.Tags != '')
+              OR (t.Additional_tags IS NOT NULL 
+              AND t.Additional_tags != '[]'
+              AND t.Additional_tags != '')
             """
             result = conn.execute(query).fetchall()
             columns = [
-                "email_id",
+                "id",
                 "subject",
-                "body_content",
+                "body",
                 "from",
+                "receivedDateTime",
+                "hasAttachments",
                 "tags",
                 "additional_tags",
-                "hasAttachments",
-                "received_at",
             ]
 
             emails = []
@@ -383,26 +388,38 @@ def load_labeled_emails(
                 email_dict["hasAttachments"] = bool(
                     email_dict.get("hasAttachments", False)
                 )
-                # Ensure body key exists for compatibility
-                email_dict["body"] = email_dict.get("body_content", "")
+                # Ensure body key exists (Message is now body)
+                if "body" not in email_dict or not email_dict["body"]:
+                    email_dict["body"] = ""
                 
-                # Combine tags and additional_tags for label
-                tags = email_dict.get("tags", "") or ""
-                additional_tags = email_dict.get("additional_tags", "") or ""
+                # Parse tags from JSON array string
+                tags_json = email_dict.get("tags", "[]") or "[]"
+                try:
+                    import json
+                    tags_list = json.loads(tags_json) if isinstance(tags_json, str) else tags_json
+                    if not isinstance(tags_list, list):
+                        tags_list = [tags_list] if tags_list else []
+                except:
+                    tags_list = []
                 
-                # Combine both tags (comma-separated)
-                combined_tags = []
-                if tags:
-                    combined_tags.append(tags)
-                if additional_tags:
-                    combined_tags.append(additional_tags)
+                # Parse additional_tags from JSON array string
+                additional_tags_json = email_dict.get("additional_tags", "[]") or "[]"
+                try:
+                    import json
+                    additional_tags_list = json.loads(additional_tags_json) if isinstance(additional_tags_json, str) else additional_tags_json
+                    if not isinstance(additional_tags_list, list):
+                        additional_tags_list = [additional_tags_list] if additional_tags_list else []
+                except:
+                    additional_tags_list = []
                 
-                # Use combined tags as label
-                email_dict["label"] = ", ".join(combined_tags) if combined_tags else None
+                # Combine Tags and Additional_tags for training
+                combined_tags = tags_list + additional_tags_list
                 
-                # Remove individual tag fields to avoid confusion
-                email_dict.pop("tags", None)
-                email_dict.pop("additional_tags", None)
+                # Use first tag as primary label, or combine all if needed
+                if combined_tags:
+                    email_dict["label"] = combined_tags[0] if len(combined_tags) == 1 else ", ".join(combined_tags)
+                else:
+                    email_dict["label"] = None
                 
                 # Only include emails with valid labels
                 if email_dict.get("label"):

@@ -14,6 +14,7 @@ import json
 import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
+from datetime import datetime
 import duckdb
 import requests
 
@@ -65,21 +66,34 @@ class EmailDownloader:
         logger.info(f"Connected to DuckDB database: {self.db_path}")
 
     def _create_table(self):
-        """Create emails table if it doesn't exist"""
+        """Create emails and threads tables if they don't exist"""
+        # Create threads table first
+        create_threads_table_sql = """
+        CREATE TABLE IF NOT EXISTS threads (
+            ThreadID VARCHAR PRIMARY KEY,
+            CreatedAt TIMESTAMP,
+            ProcessedTimestamp TIMESTAMP,
+            Tags VARCHAR,
+            Additional_tags VARCHAR
+        )
+        """
+        self.conn.execute(create_threads_table_sql)
+        logger.info("Created/verified threads table")
+
+        # Create emails table with new schema
         create_table_sql = """
         CREATE TABLE IF NOT EXISTS emails (
-            email_id VARCHAR PRIMARY KEY,
-            thread_id VARCHAR,
-            subject VARCHAR,
-            from_email VARCHAR,
-            from_name VARCHAR,
-            body_content TEXT,
-            tags VARCHAR,
-            additional_tags VARCHAR,
+            ID VARCHAR PRIMARY KEY,
+            ThreadID VARCHAR,
+            Timestamp TIMESTAMP,
+            Sender VARCHAR,
+            Subject VARCHAR,
+            Message TEXT,
+            IsRead BOOLEAN,
             has_attachments BOOLEAN,
-            received_at TIMESTAMP,
             raw_json TEXT,
-            downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (ThreadID) REFERENCES threads(ThreadID)
         )
         """
         self.conn.execute(create_table_sql)
@@ -95,7 +109,7 @@ class EmailDownloader:
             size INTEGER,
             file_path VARCHAR,
             downloaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (email_id) REFERENCES emails(email_id)
+            FOREIGN KEY (email_id) REFERENCES emails(ID)
         )
         """
         self.conn.execute(create_attachments_table_sql)
@@ -130,7 +144,7 @@ class EmailDownloader:
             if not use_next_link:
                 params = {
                     "$top": batch_size,
-                    "$select": "id,subject,from,body,conversationId,receivedDateTime,hasAttachments,categories",
+                    "$select": "id,subject,from,body,conversationId,receivedDateTime,hasAttachments,categories,isRead",
                     "$orderby": "receivedDateTime desc",
                 }
 
@@ -279,7 +293,7 @@ class EmailDownloader:
                 return False
 
             # Verify email exists before inserting attachment (foreign key constraint)
-            check_email = "SELECT email_id FROM emails WHERE email_id = ?"
+            check_email = "SELECT ID FROM emails WHERE ID = ?"
             email_exists = self.conn.execute(check_email, [email_id]).fetchone()
             if not email_exists:
                 logger.error(f"Email {email_id} does not exist in database. Cannot insert attachment.")
@@ -395,6 +409,69 @@ class EmailDownloader:
 
         return stored_count
 
+    def _ensure_thread_exists(self, thread_id: str, email_timestamp: str) -> bool:
+        """
+        Ensure thread exists in threads table, creating it if needed with CreatedAt from earliest email
+
+        Args:
+            thread_id: Thread/conversation ID
+            email_timestamp: Timestamp of the current email
+
+        Returns:
+            True if successful
+        """
+        if not thread_id:
+            return True  # Skip if no thread_id
+
+        try:
+            # Check if thread exists
+            check_sql = "SELECT ThreadID, CreatedAt FROM threads WHERE ThreadID = ?"
+            existing = self.conn.execute(check_sql, [thread_id]).fetchone()
+
+            if existing:
+                # Thread exists, update CreatedAt if this email is earlier
+                existing_created_at = existing[1]
+                if existing_created_at and email_timestamp:
+                    # Convert email_timestamp string to datetime for comparison
+                    try:
+                        # Parse ISO format timestamp string (e.g., "2024-01-01T00:00:00Z")
+                        email_dt = datetime.fromisoformat(email_timestamp.replace('Z', '+00:00'))
+                        
+                        # Convert existing_created_at to datetime if it's a string
+                        if isinstance(existing_created_at, str):
+                            existing_dt = datetime.fromisoformat(existing_created_at.replace('Z', '+00:00'))
+                        else:
+                            existing_dt = existing_created_at
+                        
+                        # Make both datetimes timezone-aware for comparison
+                        # If existing_dt is naive, assume UTC
+                        if existing_dt.tzinfo is None:
+                            from datetime import timezone
+                            existing_dt = existing_dt.replace(tzinfo=timezone.utc)
+                        # If email_dt is naive (shouldn't happen, but just in case)
+                        if email_dt.tzinfo is None:
+                            from datetime import timezone
+                            email_dt = email_dt.replace(tzinfo=timezone.utc)
+                        
+                        # Compare timezone-aware datetimes
+                        if email_dt < existing_dt:
+                            update_sql = "UPDATE threads SET CreatedAt = ? WHERE ThreadID = ?"
+                            self.conn.execute(update_sql, [email_timestamp, thread_id])
+                    except (ValueError, AttributeError, TypeError) as e:
+                        logger.warning(f"Error comparing timestamps for thread {thread_id}: {e}")
+                return True
+            else:
+                # Create new thread
+                insert_sql = """
+                INSERT INTO threads (ThreadID, CreatedAt, ProcessedTimestamp, Tags, Additional_tags)
+                VALUES (?, ?, NULL, '[]', '[]')
+                """
+                self.conn.execute(insert_sql, [thread_id, email_timestamp])
+                return True
+        except Exception as e:
+            logger.error(f"Error ensuring thread exists {thread_id}: {e}")
+            return False
+
     def store_email(self, email: Dict[str, Any]) -> Tuple[bool, int]:
         """
         Store email in DuckDB
@@ -415,77 +492,61 @@ class EmailDownloader:
 
             # Extract from address
             from_info = email.get("from", {}).get("emailAddress", {})
-            from_email = from_info.get("address", "")
-            from_name = from_info.get("name", "")
+            sender = from_info.get("address", "")
 
             # Parse dates
             received_at = email.get("receivedDateTime")
 
-            # Convert categories list to string
-            categories = email.get("categories", [])
-            tags = ", ".join(categories) if categories else None
+            # Get isRead status (default to False if not provided)
+            is_read = email.get("isRead", False)
 
             # Store raw JSON
             raw_json = json.dumps(email)
 
             email_id = email.get("id")
+            thread_id = email.get("conversationId")
 
-            # Check if email exists to preserve additional_tags
-            check_sql = "SELECT additional_tags FROM emails WHERE email_id = ?"
+            # Ensure thread exists
+            if thread_id:
+                self._ensure_thread_exists(thread_id, received_at)
+
+            # Check if email exists
+            check_sql = "SELECT ID FROM emails WHERE ID = ?"
             existing = self.conn.execute(check_sql, [email_id]).fetchone()
-            additional_tags = existing[0] if existing and existing[0] else None
 
             if existing:
-                # Update existing email (preserve additional_tags)
+                # Update existing email
                 update_sql = """
                 UPDATE emails SET
-                    thread_id = ?,
-                    subject = ?,
-                    from_email = ?,
-                    from_name = ?,
-                    body_content = ?,
-                    tags = ?,
-                    has_attachments = ?,
-                    received_at = ?,
-                    raw_json = ?
-                WHERE email_id = ?
+                    IsRead = ?,
+                WHERE ID = ?
                 """
                 self.conn.execute(
                     update_sql,
                     [
-                        email.get("conversationId"),
-                        email.get("subject"),
-                        from_email,
-                        from_name,
-                        body_content,
-                        tags,
-                        email.get("hasAttachments", False),
-                        received_at,
-                        raw_json,
-                        email_id,
+                        is_read,
+                        email_id
                     ],
                 )
             else:
                 # Insert new email
                 insert_sql = """
                 INSERT INTO emails (
-                    email_id, thread_id, subject, from_email, from_name,
-                    body_content, tags, additional_tags, has_attachments, received_at, raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ID, ThreadID, Timestamp, Sender, Subject, Message, IsRead,
+                    has_attachments, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """
                 self.conn.execute(
                     insert_sql,
                     [
                         email_id,
-                        email.get("conversationId"),
-                        email.get("subject"),
-                        from_email,
-                        from_name,
-                        body_content,
-                        tags,
-                        additional_tags,  # Will be None for new emails
-                        email.get("hasAttachments", False),
+                        thread_id,
                         received_at,
+                        sender,
+                        email.get("subject"),
+                        body_content,
+                        is_read,
+                        email.get("hasAttachments", False),
                         raw_json,
                     ],
                 )
