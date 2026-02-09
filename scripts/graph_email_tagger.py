@@ -158,6 +158,7 @@ class GraphEmailTagger:
         return {
             "Authorization": f"Bearer {self.access_token}",
             "Content-Type": "application/json",
+            "Prefer": 'outlook.body-content-type="text"',
         }
 
     def read_emails(

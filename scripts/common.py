@@ -3,29 +3,46 @@ Common utility functions for email processing scripts
 """
 
 import re
-from bs4 import BeautifulSoup
 
 
-def html_to_text(html_content: str) -> str:
-    """
-    Convert HTML content to plain text
-
-    Args:
-        html_content: HTML string
-
-    Returns:
-        Plain text string
-    """
-    if not html_content:
+def clean_email_body(email_body: str) -> str:
+    if not email_body:
         return ""
 
-    try:
-        soup = BeautifulSoup(html_content, "html.parser")
-        # Get text and clean up whitespace
-        text = soup.get_text(separator=" ", strip=True)
-        # Normalize multiple spaces/newlines to single spaces
-        text = re.sub(r"\s+", " ", text)
-        return text.strip()
-    except Exception as e:
-        # Return original content if parsing fails
-        return html_content
+    # Remove email headers: From:, Sent:, To:, Subject:
+    # Match lines that start with these headers (case-insensitive)
+    pattern = r"^(From:|Sent:|To:|Cc:|Subject:|Telephone:|Email:|-EXTERNAL EMAIL-|EXTERNAL EMAIL|LIONS GATE INTERNATIONAL).*$"
+    lines = email_body.split("\r\n")
+    cleaned_lines = []
+    skip_until_delimiter = False
+
+    for line in lines:
+        line = line.replace("\n", "").strip()
+
+        # Skip empty lines
+        if not line:
+            continue
+
+        # Check if we should start skipping (found [Premeire Digital Services])
+        if "[Premeire Digital Services]" in line:
+            skip_until_delimiter = True
+            continue
+
+        # Check if we found the delimiter (stop skipping)
+        if skip_until_delimiter and "_____________________" in line:
+            skip_until_delimiter = False
+
+        # Skip lines while in removal mode
+        if skip_until_delimiter:
+            continue
+
+        # Skip email headers
+        if re.match(pattern, line, re.IGNORECASE):
+            continue
+
+        if "m:" in line.lower() and "e:" in line.lower():
+            continue
+
+        cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines).strip()

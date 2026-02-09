@@ -21,7 +21,7 @@ import requests
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scripts.graph_email_tagger import GraphEmailTagger, load_config
-from scripts.common import html_to_text
+from scripts.common import clean_email_body
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -410,9 +410,8 @@ class EmailDownloader:
             body = email.get("body", {})
             body_content = body.get("content", "")
 
-            # Convert HTML to plain text if needed
-            if body.get("contentType", "") == "html" and body_content:
-                body_content = html_to_text(body_content)
+            if body_content:
+                body_content = clean_email_body(body_content)
 
             # Extract from address
             from_info = email.get("from", {}).get("emailAddress", {})
