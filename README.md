@@ -8,7 +8,6 @@ This project reads and processes Outlook emails (including attachments) using Mi
 - ✅ **Attachment Support**: Downloads and extracts text from PDFs, Word docs, Excel files, and more
 - ✅ **ML-Based Labeling**: Trains a model on labeled emails to predict categories
 - ✅ **REST API**: Flask API server for real-time predictions
-- ✅ **Email Sending**: Send emails via SMTP
 
 ## Project Structure
 
@@ -260,14 +259,6 @@ GET /api/model/info
 - `user_principal_name`: User email/UPN (required for app-only auth)
 - `ml_api_url`: ML API server URL (default: http://localhost:5000)
 
-### SMTP Configuration (`config/smtp_config.json`)
-
-- `smtp_server`: SMTP server address (e.g., smtp.office365.com)
-- `smtp_port`: SMTP port (usually 587)
-- `use_tls`: Use TLS encryption (usually true)
-- `username`: Your email address
-- `password`: Your email password or App Password
-
 ## Troubleshooting
 
 ### Email Access Issues
@@ -277,11 +268,6 @@ GET /api/model/info
   - Ensure Mail.ReadWrite application permission is granted
   - Verify admin consent has been granted for the app
   - Check that user_principal_name is correct and user exists in tenant
-
-- **SMTP sending fails**:
-  - Check SMTP server settings match your email provider
-  - Ensure TLS/SSL settings are correct (usually TLS for port 587)
-  - For Office 365: Use App Password if required
 
 - **Attachments not downloading**: Check file permissions and disk space
 - **API calls failing**: Ensure ML API server is running on port 5000

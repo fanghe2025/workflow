@@ -1,7 +1,0 @@
-{
-  "smtp_server": "smtp.office365.com",
-  "smtp_port": 587,
-  "use_tls": true,
-  "username": "your-email@outlook.com",
-  "password": "your-password-or-app-password"
-}

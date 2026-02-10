@@ -625,13 +625,6 @@ class EmailDownloader:
         """
         logger.info(f"Starting email download from folder: {folder}")
 
-        # Get all mail folders
-        folders = self.get_all_mail_folders()
-        if folders:
-            logger.info(f"Found {len(folders)} mail folders:")
-            for folder_info in folders:
-                logger.info(f"  - {folder_info.get('displayName', 'Unknown')} (ID: {folder_info.get('id', 'N/A')})")
-
         # Read all emails
         emails = self.read_all_emails(
             folder=folder, filter_query=filter_query, batch_size=batch_size
@@ -718,6 +711,7 @@ def main():
 
     downloader = EmailDownloader(tagger, db_path=db_path, attachments_dir=attachments_dir)
     try:
+        # folders = downloader.get_all_mail_folders()
         for folder in ("inbox", "archive"):
             results = downloader.download_and_store(
                 folder=folder,

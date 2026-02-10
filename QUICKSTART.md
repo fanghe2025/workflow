@@ -103,11 +103,6 @@ curl -X POST http://localhost:5000/api/predict \
   - Verify admin consent has been granted
   - Check that user_principal_name is correct
 
-- **SMTP sending fails**:
-  - Check SMTP server is set to `smtp.office365.com` and port `587`
-  - Ensure `use_tls` is set to `true`
-  - Some accounts may require an App Password for SMTP
-
 - **API not responding**: Check if port 5000 is available
 - **No emails processed**: Check Microsoft Graph API permissions and user access
 - **Model training fails**: Ensure you have labeled emails in `data/labeled_emails.json`

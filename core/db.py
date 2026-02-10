@@ -7,6 +7,7 @@ for the DuckDB email storage system.
 
 import logging
 import duckdb
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,9 @@ class DatabaseConnection:
             auto_init: If True, automatically initialize tables on connection
         """
         self.db_path = db_path
+        db_dir = Path(self.db_path).parent
+        db_dir.mkdir(parents=True, exist_ok=True)
+
         self.conn = None
         if auto_init:
             self.connect()
