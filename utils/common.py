@@ -3,6 +3,24 @@ Common utility functions for email processing scripts
 """
 
 import re
+from pathlib import Path
+from typing import Dict, Any
+import json
+
+
+def load_config(config_path: str = "config/graph_config.json") -> Dict[str, Any]:
+    """Load Graph API configuration from JSON file"""
+    config_file = Path(config_path)
+    if not config_file.exists():
+        print(f"Config file not found: {config_path}")
+        return {}
+
+    try:
+        with open(config_file, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error loading config: {e}")
+        return {}
 
 
 def clean_email_body(email_body: str) -> str:

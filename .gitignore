@@ -53,3 +53,6 @@ logs/
 
 # n8n
 .n8n/
+
+# config
+config/graph_config.json

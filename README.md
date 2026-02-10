@@ -9,35 +9,6 @@ This project reads and processes Outlook emails (including attachments) using Mi
 - ✅ **ML-Based Labeling**: Trains a model on labeled emails to predict categories
 - ✅ **REST API**: Flask API server for real-time predictions
 
-## Project Structure
-
-```
-.
-├── api/                    # ML API server
-│   └── ml_api_server.py   # Flask API for predictions
-├── config/                 # Configuration files
-│   ├── graph_config.json.example
-│   ├── smtp_config.json.example
-│   └── training_config.json
-├── data/                   # Data storage (gitignored)
-│   ├── processed_emails/  # Emails collected from Microsoft Graph API
-│   ├── attachments/        # Downloaded attachments
-│   └── labeled_emails.json # Labeled training data
-├── ml_training/            # ML training scripts
-│   └── train_model.py     # Model training script
-├── models/                 # Trained models (gitignored)
-│   └── email_classifier.pkl
-├── scripts/                # Utility scripts
-│   ├── graph_email_tagger.py
-│   ├── smtp_email_writer.py
-│   ├── process_attachments.py
-│   └── label_emails.py
-├── utils/                  # Utility modules
-│   └── attachment_processor.py
-├── requirements.txt        # Python dependencies
-└── README.md
-```
-
 ## Prerequisites
 
 1. **Python 3.8+**

@@ -2,7 +2,6 @@
   "client_id": "your-azure-ad-application-client-id",
   "client_secret": "your-azure-ad-application-secret",
   "tenant_id": "your-azure-ad-tenant-id-or-domain",
-  "authority_url": "https://login.microsoftonline.com/your-tenant-id",
-  "user_principal_name": "user@domain.com",
+  "user_email": "user@domain.com",
   "ml_api_url": "http://localhost:5000"
 }
