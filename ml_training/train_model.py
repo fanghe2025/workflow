@@ -16,12 +16,12 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, accuracy_score
 import joblib
-import duckdb
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from utils.attachment_processor import AttachmentProcessor
+from scripts.model import DatabaseConnection
 
 
 class EmailLabelingModel:
@@ -346,89 +346,92 @@ def load_labeled_emails(
             print(f"Warning: DuckDB file not found: {db_path}")
             return []
 
-        conn = duckdb.connect(db_path)
-        try:
-            # Query emails with labels from threads table
-            # Tags and Additional_tags are now stored in threads table
-            query = """
-            SELECT 
-                e.ID,
-                e.Subject,
-                e.Message,
-                e.Sender,
-                e.Timestamp,
-                e.has_attachments,
-                t.Tags,
-                t.Additional_tags
-            FROM emails e
-            LEFT JOIN threads t ON e.ThreadID = t.ThreadID
-            WHERE (t.Tags IS NOT NULL 
-              AND t.Tags != '[]'
-              AND t.Tags != '')
-              OR (t.Additional_tags IS NOT NULL 
-              AND t.Additional_tags != '[]'
-              AND t.Additional_tags != '')
-            """
-            result = conn.execute(query).fetchall()
-            columns = [
-                "id",
-                "subject",
-                "body",
-                "from",
-                "receivedDateTime",
-                "hasAttachments",
-                "tags",
-                "additional_tags",
-            ]
+        db = DatabaseConnection(db_path=db_path, auto_init=False)
+        conn = db.conn
+        # Query emails with labels from threads table
+        # Tags and Additional_tags are now stored in threads table
+        query = """
+        SELECT 
+            e.ID,
+            e.Subject,
+            e.Message,
+            e.Sender,
+            e.Timestamp,
+            e.has_attachments,
+            t.Tags,
+            t.Additional_tags
+        FROM emails e
+        LEFT JOIN threads t ON e.ThreadID = t.ThreadID
+        WHERE (t.Tags IS NOT NULL 
+            AND t.Tags != '[]'
+            AND t.Tags != '')
+            OR (t.Additional_tags IS NOT NULL 
+            AND t.Additional_tags != '[]'
+            AND t.Additional_tags != '')
+        """
+        result = conn.execute(query).fetchall()
+        columns = [
+            "id",
+            "subject",
+            "body",
+            "from",
+            "receivedDateTime",
+            "hasAttachments",
+            "tags",
+            "additional_tags",
+        ]
 
-            emails = []
-            for row in result:
-                email_dict = dict(zip(columns, row))
-                # Convert hasAttachments boolean
-                email_dict["hasAttachments"] = bool(
-                    email_dict.get("hasAttachments", False)
+        emails = []
+        for row in result:
+            email = dict(zip(columns, row))
+            # Convert hasAttachments boolean
+            email["hasAttachments"] = bool(email.get("hasAttachments", False))
+            # Ensure body key exists (Message is now body)
+            if "body" not in email or not email["body"]:
+                email["body"] = ""
+
+            # Parse tags from JSON array string
+            tags = email.get("tags", "[]") or "[]"
+            try:
+
+                tags = json.loads(tags) if isinstance(tags, str) else tags
+                if not isinstance(tags, list):
+                    tags = [tags] if tags else []
+            except:
+                tags = []
+
+            # Parse additional_tags from JSON array string
+            additional_tags = email.get("additional_tags", "[]") or "[]"
+            try:
+                additional_tags = (
+                    json.loads(additional_tags)
+                    if isinstance(additional_tags, str)
+                    else additional_tags
                 )
-                # Ensure body key exists (Message is now body)
-                if "body" not in email_dict or not email_dict["body"]:
-                    email_dict["body"] = ""
-                
-                # Parse tags from JSON array string
-                tags_json = email_dict.get("tags", "[]") or "[]"
-                try:
-                    import json
-                    tags_list = json.loads(tags_json) if isinstance(tags_json, str) else tags_json
-                    if not isinstance(tags_list, list):
-                        tags_list = [tags_list] if tags_list else []
-                except:
-                    tags_list = []
-                
-                # Parse additional_tags from JSON array string
-                additional_tags_json = email_dict.get("additional_tags", "[]") or "[]"
-                try:
-                    import json
-                    additional_tags_list = json.loads(additional_tags_json) if isinstance(additional_tags_json, str) else additional_tags_json
-                    if not isinstance(additional_tags_list, list):
-                        additional_tags_list = [additional_tags_list] if additional_tags_list else []
-                except:
-                    additional_tags_list = []
-                
-                # Combine Tags and Additional_tags for training
-                combined_tags = tags_list + additional_tags_list
-                
-                # Use first tag as primary label, or combine all if needed
-                if combined_tags:
-                    email_dict["label"] = combined_tags[0] if len(combined_tags) == 1 else ", ".join(combined_tags)
-                else:
-                    email_dict["label"] = None
-                
-                # Only include emails with valid labels
-                if email_dict.get("label"):
-                    emails.append(email_dict)
+                if not isinstance(additional_tags, list):
+                    additional_tags = [additional_tags] if additional_tags else []
+            except:
+                additional_tags = []
 
-            print(f"Loaded {len(emails)} labeled emails from DuckDB")
-            return emails
-        finally:
-            conn.close()
+            # Combine Tags and Additional_tags for training
+            combined_tags = tags + additional_tags
+
+            # Use first tag as primary label, or combine all if needed
+            if combined_tags:
+                email["label"] = (
+                    combined_tags[0]
+                    if len(combined_tags) == 1
+                    else ", ".join(combined_tags)
+                )
+            else:
+                email["label"] = None
+
+            # Only include emails with valid labels
+            if email.get("label"):
+                emails.append(email)
+
+        print(f"Loaded {len(emails)} labeled emails from DuckDB")
+        return emails
 
     # Fallback to JSON file
     if data_path and os.path.exists(data_path):
