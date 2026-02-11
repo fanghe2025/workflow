@@ -53,7 +53,7 @@ class GraphAPIClient:
         self.app = ConfidentialClientApplication(
             client_id=client_id,
             client_credential=client_secret,
-            authority="https://login.microsoftonline.com/{tenant_id}",
+            authority=f"https://login.microsoftonline.com/{tenant_id}",
         )
 
     def authenticate(self) -> bool:
@@ -291,14 +291,12 @@ class GraphAPIClient:
                 logger.error(f"Response: {e.response.text}")
             return False
 
-    def download_attachment(
-        self, message_id: str, attachment_id: str
-    ) -> Optional[bytes]:
+    def download_attachment(self, email_id: str, attachment_id: str) -> Optional[bytes]:
         """
         Download attachment content from Graph API.
 
         Args:
-            message_id: Email message ID.
+            email_id: Email ID.
             attachment_id: Attachment ID.
 
         Returns:
@@ -306,7 +304,7 @@ class GraphAPIClient:
         """
         url = (
             f"{self.graph_endpoint}/users/{self.user_email}/messages/"
-            f"{message_id}/attachments/{attachment_id}/$value"
+            f"{email_id}/attachments/{attachment_id}/$value"
         )
         try:
             response = requests.get(url, headers=self.get_headers())
@@ -314,6 +312,6 @@ class GraphAPIClient:
             return response.content
         except requests.exceptions.RequestException as e:
             logger.warning(
-                f"Error downloading attachment {attachment_id} from {message_id}: {e}"
+                f"Error downloading attachment {attachment_id} from {email_id}: {e}"
             )
             return None

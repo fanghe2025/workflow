@@ -98,7 +98,7 @@ class EmailDownloader:
             return None
 
     def store_attachment(
-        self, email_id: str, attachment: Dict[str, Any], file_path: Optional[str]
+        self, email_id: str, attachment: Dict[str, Any], file_path: Optional[str] = None
     ) -> bool:
         """
         Store attachment metadata in DuckDB
@@ -120,15 +120,6 @@ class EmailDownloader:
 
             if not email_id:
                 logger.error("Email ID is missing for attachment")
-                return False
-
-            # Verify email exists before inserting attachment (foreign key constraint)
-            check_email = "SELECT ID FROM emails WHERE ID = ?"
-            email_exists = self.conn.execute(check_email, [email_id]).fetchone()
-            if not email_exists:
-                logger.error(
-                    f"Email {email_id} does not exist in database. Cannot insert attachment."
-                )
                 return False
 
             # Check if attachment already exists
@@ -153,6 +144,7 @@ class EmailDownloader:
                         file_path,
                     ],
                 )
+                self.conn.commit()
             return True
         except Exception as e:
             logger.error(
@@ -161,107 +153,56 @@ class EmailDownloader:
             return False
 
     def download_and_store_attachments(
-        self, email_id: str, message_id: str, download: bool = False
-    ) -> Tuple[int, List[str]]:
+        self, email_id: str, download: bool = True
+    ) -> List[str]:
         """
         Download and store all attachments for an email
 
         Args:
             email_id: Email ID (for database reference)
-            message_id: Message ID (for Graph API)
             download: If True, download attachment files. If False, only collect metadata and names.
 
         Returns:
             Tuple of (number of attachments stored, list of attachment file names)
         """
-        if not email_id or not message_id:
-            return 0, []
+        if not email_id:
+            return []
 
         # Get attachment list
-        attachments = self.api_client.get_email_attachments(message_id)
+        attachments = self.api_client.get_email_attachments(email_id)
         if not attachments:
-            return 0, []
+            return []
 
-        if download:
-            logger.info(
-                f"Downloading {len(attachments)} attachments for email {email_id}"
-            )
-        else:
-            logger.info(
-                f"Collecting metadata for {len(attachments)} attachments for email {email_id}"
-            )
-
-        stored_count = 0
         attachment_names: List[str] = []
         for attachment in attachments:
             attachment_id = attachment.get("id")
             attachment_name = attachment.get("name")
-
-            if not download:
-                # Only collect metadata, don't download files
-                if attachment_name:
-                    attachment_names.append(attachment_name)
-                # Store metadata in database without file path
-                if self.store_attachment(email_id, attachment, None):
-                    stored_count += 1
-                    logger.debug(f"Stored attachment metadata: {attachment_name}")
-                    self.conn.commit()
-                continue
-
-            # Get expected file path
-            file_path_obj = self.get_attachment_file_path(
-                email_id, attachment_id, attachment_name
-            )
-            file_path = str(file_path_obj)
-
-            # Check if file already exists
-            if file_path_obj.exists():
-                logger.debug(
-                    f"Attachment file already exists, skipping download: {attachment_name}"
+            attachment_names.append(attachment_name)
+            file_path = None
+            if download:
+                file_path_obj = self.get_attachment_file_path(
+                    email_id, attachment_id, attachment_name
                 )
-                # File exists, use it directly
-            else:
-                # Download attachment content from Graph API
-                content = self.download_attachment(message_id, attachment_id)
-                if not content:
-                    logger.warning(f"Failed to download attachment {attachment_name}")
-                    # Still store metadata even if download failed
-                    self.store_attachment(email_id, attachment, None)
-                    # Still add name to list even if download failed
-                    if attachment_name:
-                        attachment_names.append(attachment_name)
-                    continue
+                # Check if file already exists and download if it doesn't
+                if not file_path_obj.exists():
+                    content = self.api_client.download_attachment(
+                        email_id, attachment_id
+                    )
+                    if content:
+                        file_path = self.save_attachment_file(
+                            email_id, attachment_id, attachment_name, content
+                        )
 
-                # Save file to disk
-                saved_path = self.save_attachment_file(
-                    email_id, attachment_id, attachment_name, content
-                )
-                if not saved_path:
-                    logger.warning(f"Failed to save attachment {attachment_name}")
-                    # Still store metadata even if save failed
-                    self.store_attachment(email_id, attachment, None)
-                    # Still add name to list even if save failed
-                    if attachment_name:
-                        attachment_names.append(attachment_name)
-                    continue
-                file_path = saved_path
+            self.store_attachment(email_id, attachment, file_path)
 
-            # Store in database
-            if self.store_attachment(email_id, attachment, file_path):
-                stored_count += 1
-                if attachment_name:
-                    attachment_names.append(attachment_name)
-                logger.debug(f"Stored attachment: {attachment_name}")
-                # Commit after each attachment to ensure data is persisted
-                self.conn.commit()
-
-        return stored_count, attachment_names
+        return attachment_names
 
     def _ensure_thread_exists(
         self,
         thread_id: str,
         email_timestamp: str,
         current_folder: Optional[str] = None,
+        tags: List[str] = [],
     ) -> bool:
         """
         Ensure thread exists in threads table, creating it if needed with CreatedAt from earliest email
@@ -340,11 +281,11 @@ class EmailDownloader:
             else:
                 # Create new thread
                 insert_sql = """
-                INSERT INTO threads (ThreadID, CreatedAt, ProcessedTimestamp, current_folder, Tags, Additional_tags)
-                VALUES (?, ?, NULL, ?, '[]', '[]')
+                INSERT INTO threads (ThreadID, CreatedAt, ProcessedTimestamp, Tags, Additional_tags, current_folder)
+                VALUES (?, ?, NULL, ?, '[]', ?)
                 """
                 self.conn.execute(
-                    insert_sql, [thread_id, email_timestamp, current_folder]
+                    insert_sql, [thread_id, email_timestamp, tags, current_folder]
                 )
                 return True
         except Exception as e:
@@ -367,125 +308,75 @@ class EmailDownloader:
             Tuple of (success: bool, attachment_count: int)
         """
         try:
-            # Extract body content
             body = email.get("body", {})
-            body_content = body.get("content", "")
-
-            if body_content:
-                body_content = clean_email_body(body_content)
-
-            # Extract from address
+            body_content = clean_email_body(body.get("content", ""))
             from_info = email.get("from", {}).get("emailAddress", {})
             sender = from_info.get("address", "")
-
-            # Parse dates
             received_at = email.get("receivedDateTime")
-
-            # Get isRead status (default to False if not provided)
             is_read = email.get("isRead", False)
-
-            # Store raw JSON
             raw_json = json.dumps(email)
+            tags = email.get("categories", [])
 
             email_id = email.get("id")
             thread_id = email.get("conversationId")
-
-            # Ensure thread exists and update its current_folder
-            if thread_id:
-                self._ensure_thread_exists(
-                    thread_id, received_at, current_folder=current_folder
-                )
+            self._ensure_thread_exists(
+                thread_id, received_at, current_folder=current_folder, tags=tags
+            )
 
             # Check if email exists
             check_sql = "SELECT ID FROM emails WHERE ID = ?"
             existing = self.conn.execute(check_sql, [email_id]).fetchone()
-
-            # Download and store attachments if present, and collect attachment names
-            attachment_count = 0
-            attachment_names: List[str] = []
-            if email.get("hasAttachments", False):
-                message_id = email.get("id")
-                # If email doesn't exist yet, insert it first (without attachments) for foreign key constraint
-                if not existing:
-                    insert_sql = """
-                    INSERT INTO emails (
-                        ID, ThreadID, Timestamp, Sender, Subject, Message, IsRead,
-                        has_attachments, attachments, raw_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """
-                    self.conn.execute(
-                        insert_sql,
-                        [
-                            email_id,
-                            thread_id,
-                            received_at,
-                            sender,
-                            email.get("subject"),
-                            body_content,
-                            is_read,
-                            email.get("hasAttachments", False),
-                            "[]",  # Empty attachments initially
-                            raw_json,
-                        ],
-                    )
-                    # Commit email first to ensure it's available for foreign key constraint
-                    self.conn.commit()
-
-                # Now download attachments (email exists, so foreign key constraint is satisfied)
-                attachment_count, attachment_names = (
-                    self.download_and_store_attachments(email_id, message_id)
-                )
-
-            # Store attachments as JSON array
-            attachments_json = (
-                json.dumps(attachment_names) if attachment_names else "[]"
-            )
-
             if existing:
-                # Update existing email with IsRead and attachment names
-                update_sql = """
-                UPDATE emails SET
-                    IsRead = ?,
-                    attachments = ?
-                WHERE ID = ?
-                """
                 self.conn.execute(
-                    update_sql,
-                    [
-                        is_read,
-                        attachments_json,
-                        email_id,
-                    ],
+                    "UPDATE emails SET IsRead = ? WHERE ID = ?", [is_read, email_id]
                 )
             else:
-                # Update the email we just inserted with attachment names (if any)
-                if attachment_names:
-                    update_sql = """
-                    UPDATE emails SET
-                        attachments = ?
-                    WHERE ID = ?
-                    """
+                insert_sql = """
+                INSERT INTO emails (
+                    ID, ThreadID, Timestamp, Sender, Subject, Message, IsRead,
+                    has_attachments, attachments, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
+                self.conn.execute(
+                    insert_sql,
+                    [
+                        email_id,
+                        thread_id,
+                        received_at,
+                        sender,
+                        email.get("subject"),
+                        body_content,
+                        is_read,
+                        email.get("hasAttachments", False),
+                        "[]",
+                        raw_json,
+                    ],
+                )
+                self.conn.commit()
+                attachment_names: List[str] = []
+                if email.get("hasAttachments", False):
+                    attachment_names = self.download_and_store_attachments(
+                        email_id, download=False
+                    )
                     self.conn.execute(
-                        update_sql,
+                        "UPDATE emails SET attachments = ? WHERE ID = ?",
                         [
-                            attachments_json,
+                            json.dumps(attachment_names) if attachment_names else "[]",
                             email_id,
                         ],
                     )
-
-            # Commit email updates
             self.conn.commit()
-
-            return True, attachment_count
+            return True
         except Exception as e:
             logger.error(f"Error storing email {email.get('id', 'unknown')}: {e}")
-            return False, 0
+            return False
 
     def download_and_store(
         self,
         folder: str = "inbox",
         filter_query: Optional[str] = None,
         batch_size: int = 100,
+        limit: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Download all emails and store in DuckDB
@@ -501,20 +392,19 @@ class EmailDownloader:
         logger.info(f"Starting email download from folder: {folder}")
 
         # Read all emails
-        emails = self.read_all_emails(
-            folder=folder, filter_query=filter_query, batch_size=batch_size
+        emails = self.api_client.read_emails(
+            folder=folder, filter_query=filter_query, batch_size=batch_size, limit=limit
         )
 
         if not emails:
             logger.warning("No emails found")
-            return {"downloaded": 0, "stored": 0, "errors": 0, "attachments": 0}
+            return {"downloaded": 0, "stored": 0, "errors": 0}
 
         # Store emails
         results = {
             "downloaded": len(emails),
             "stored": 0,
             "errors": 0,
-            "attachments": 0,
         }
 
         logger.info(f"Storing {len(emails)} emails in DuckDB...")
@@ -522,20 +412,15 @@ class EmailDownloader:
             if i % 100 == 0:
                 logger.info(f"Storing email {i}/{len(emails)}...")
 
-            success, attachment_count = self.store_email(email, current_folder=folder)
+            success = self.store_email(email, current_folder=folder)
             if success:
                 results["stored"] += 1
-                results["attachments"] += attachment_count
             else:
                 results["errors"] += 1
 
-        # Commit transaction
-        self.conn.commit()
-
         logger.info(
             f"Download complete: {results['downloaded']} downloaded, "
-            f"{results['stored']} stored, {results['attachments']} attachments, "
-            f"{results['errors']} errors"
+            f"{results['stored']} stored, {results['errors']} errors"
         )
 
         return results
