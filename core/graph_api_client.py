@@ -249,6 +249,39 @@ class GraphAPIClient:
             logger.warning(f"Error getting attachments for {message_id}: {e}")
             return []
 
+    def get_category_list(self) -> List[str]:
+        """
+        Get all categories that have been defined for a user.
+
+        Returns:
+            List of category names.
+        """
+        url = f"{self.graph_endpoint}/users/{self.user_email}/outlook/masterCategories"
+        all_categories = []
+
+        try:
+            params = {
+                "$select": "id,displayName,color",
+            }
+
+            logger.info(f"Fetching mail folders...")
+            response = requests.get(url, headers=self.get_headers(), params=params)
+            response.raise_for_status()
+            data = response.json()
+            for category in data.get("value", []):
+                all_categories.append(category.get("displayName"))
+
+        except requests.exceptions.HTTPError as e:
+            logger.error(f"HTTP error reading mail folders: {e}")
+            if e.response is not None:
+                logger.error(f"Status code: {e.response.status_code}")
+                logger.error(f"Response: {e.response.text}")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error reading mail folders: {e}")
+
+        logger.info(f"Total mail folders retrieved: {len(all_categories)}")
+        return all_categories
+
     def add_category(self, message_id: str, category: str) -> bool:
         """
         Add a category/tag to an email

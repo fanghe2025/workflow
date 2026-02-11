@@ -25,6 +25,8 @@ def main():
         print("Failed to authenticate API client")
         return 1
 
+    # categories = api_client.get_category_list()
+    # print(categories)
     emails = api_client.read_emails()
 
     # Initialize and predict model
@@ -32,6 +34,8 @@ def main():
     model.load()
 
     try:
+        print(f"{'Original Tags':<50} | {'Predicted Tags'}")
+        print("-" * 100)
         for email in emails:
             body = email.get("body", {})
             from_info = email.get("from", {}).get("emailAddress", {})
@@ -48,7 +52,8 @@ def main():
                 for attachment in attachments:
                     data["attachments"].append(attachment.get("name"))
             prediction = model.predict(data)
-            print(prediction)
+            print(f"{str(tags):<50} | {str(prediction):<50}")
+            print("-" * 100)
         print("\nTraining completed successfully!")
     except Exception as e:
         print(f"Error during training: {e}")
