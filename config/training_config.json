@@ -22,7 +22,7 @@
     "model_output": "models/email_classifier.pkl"
   },
   "attachment_processing": {
-    "enabled": true,
+    "enabled": false,
     "max_file_size_mb": 10,
     "supported_formats": [
       "pdf",

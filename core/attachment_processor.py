@@ -7,7 +7,7 @@ Extracts text content from various attachment types for ML training.
 import os
 import io
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 import logging
 
 try:
@@ -208,46 +208,3 @@ class AttachmentProcessor:
         except Exception as e:
             logger.error(f"Error reading Excel: {e}")
             return ""
-
-    def process_attachments_from_email(
-        self, email_data: Dict[str, Any], attachments_dir: str = "data/attachments"
-    ) -> List[Dict[str, Any]]:
-        """
-        Process all attachments from an email.
-
-        Args:
-            email_data: Email data dictionary with attachment information
-            attachments_dir: Directory to save attachments
-
-        Returns:
-            List of processed attachment results
-        """
-        processed_attachments = []
-
-        if not email_data.get("hasAttachments", False):
-            return processed_attachments
-
-        attachments = email_data.get("attachments", [])
-        if not attachments:
-            return processed_attachments
-
-        os.makedirs(attachments_dir, exist_ok=True)
-
-        for attachment in attachments:
-            attachment_id = attachment.get("id", "unknown")
-            attachment_name = attachment.get("name", f"attachment_{attachment_id}")
-
-            # Save attachment if content is provided
-            attachment_path = os.path.join(attachments_dir, attachment_name)
-
-            # Process attachment
-            # Note: Attachment content should be downloaded first
-            result = self.process_attachment(
-                file_path=attachment_path, content_type=attachment.get("contentType")
-            )
-
-            result["attachment_id"] = attachment_id
-            result["attachment_name"] = attachment_name
-            processed_attachments.append(result)
-
-        return processed_attachments

@@ -5,12 +5,12 @@ This script trains a machine learning model to classify emails based on
 their content, subject, sender, attachments, and other features.
 """
 
-import json
 import os
 import sys
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 import numpy as np
+from scipy.sparse import hstack
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
@@ -20,8 +20,7 @@ import joblib
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from utils.attachment_processor import AttachmentProcessor
-from scripts.model import DatabaseConnection
+from core.attachment_processor import AttachmentProcessor
 
 
 class EmailLabelingModel:
@@ -66,10 +65,14 @@ class EmailLabelingModel:
 
         for email in emails:
             # Combine subject and body (support both 'body' and 'body_content' keys)
-            subject = email.get("subject", "")
-            body = email.get("body_content", email.get("body", ""))
+            subject = email["Subject"]
+            body = email["Message"]
+            sender = email["Sender"]
+            attachment_names = email["attachments"]
 
-            text_parts = [subject, body]
+            text_parts = [subject, body, sender]
+            if attachment_names:
+                text_parts.append(",".join(attachment_names))
 
             # Add attachment text if available
             if self.attachment_processor and email.get("attachment_texts"):
@@ -89,11 +92,11 @@ class EmailLabelingModel:
 
         for email in emails:
             # Extract domain from sender
-            from_email = email.get("from", "")
+            from_email = email["Sender"]
             domain = from_email.split("@")[-1] if "@" in from_email else ""
 
             # Count attachments
-            num_attachments = len(email.get("attachments", []))
+            num_attachments = len(email["attachments"])
             has_attachments = 1 if num_attachments > 0 else 0
 
             # Attachment text length
@@ -103,24 +106,17 @@ class EmailLabelingModel:
                     len(text) for text in email.get("attachment_texts", [])
                 )
 
-            # Text statistics
-            subject_length = len(email.get("subject", "").split())
-            body = email.get("body_content", email.get("body", ""))
-            body_length = len(body.split())
-
             # Importance
             importance = email.get("importance", "normal")
             is_high_importance = 1 if importance == "high" else 0
 
             # Feature vector
             feat = [
+                is_high_importance,
                 has_attachments,
                 num_attachments,
-                subject_length,
-                body_length,
-                attachment_text_length,
-                is_high_importance,
                 len(domain),  # Domain length as feature
+                attachment_text_length,
             ]
             features.append(feat)
 
@@ -132,33 +128,34 @@ class EmailLabelingModel:
             raise ValueError("No labeled emails provided for training")
 
         # Filter emails with labels
-        emails = [e for e in labeled_emails if "label" in e]
-        labels = [e["label"] for e in emails]
+        emails = [e for e in labeled_emails if "Tags" in e]
+        labels = [",".join(e["Tags"]) for e in emails]
 
         if not emails:
             raise ValueError("No emails with labels found")
 
         print(f"Found {len(emails)} labeled emails for training")
 
-        # Process attachments if enabled
+        # Process attachments
         if self.attachment_processor:
-            print("Processing attachments...")
             for email in emails:
                 if email.get("hasAttachments", False) and email.get("attachments"):
                     attachment_texts = []
-                    for attachment in email.get("attachments", []):
-                        # If attachment has text_content, use it
-                        if "text_content" in attachment:
-                            if attachment["text_content"]:
+                    if "attachment_texts" not in email:
+                        # Process only if missing
+                        for attachment in email.get("attachments", []):
+                            if (
+                                "text_content" in attachment
+                                and attachment["text_content"]
+                            ):
                                 attachment_texts.append(attachment["text_content"])
-                        # Otherwise try to process from file path
-                        elif "file_path" in attachment:
-                            result = self.attachment_processor.process_attachment(
-                                attachment["file_path"]
-                            )
-                            if result.get("text_content"):
-                                attachment_texts.append(result["text_content"])
-                    email["attachment_texts"] = attachment_texts
+                            elif "file_path" in attachment:
+                                result = self.attachment_processor.process_attachment(
+                                    attachment["file_path"]
+                                )
+                                if result.get("text_content"):
+                                    attachment_texts.append(result["text_content"])
+                        email["attachment_texts"] = attachment_texts
 
         # Create label encoder
         unique_labels = sorted(set(labels))
@@ -179,8 +176,6 @@ class EmailLabelingModel:
         X_additional = self.prepare_additional_features(emails)
 
         # Combine features
-        from scipy.sparse import hstack
-
         X = hstack([X_text, X_additional])
 
         # Encode labels
@@ -275,8 +270,6 @@ class EmailLabelingModel:
         X_additional = self.prepare_additional_features([email])
 
         # Combine
-        from scipy.sparse import hstack
-
         X = hstack([X_text, X_additional])
 
         # Predict
@@ -295,21 +288,19 @@ class EmailLabelingModel:
 
         return {
             "label": str(label),
-            "confidence": float(confidence),
+            "confidence": confidence,
             "all_probabilities": all_probs,
         }
 
     def save(self):
         """Save the trained model"""
         os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
-
         model_data = {
             "model": self.model,
             "vectorizer": self.vectorizer,
             "label_encoder": self.label_encoder,
             "reverse_label_encoder": self.reverse_label_encoder,
         }
-
         joblib.dump(model_data, self.model_path)
         print(f"Model saved to {self.model_path}")
 
@@ -325,192 +316,3 @@ class EmailLabelingModel:
         self.reverse_label_encoder = model_data["reverse_label_encoder"]
         self.is_trained = True
         print(f"Model loaded from {self.model_path}")
-
-
-def load_labeled_emails(
-    data_path: Optional[str] = None, db_path: Optional[str] = None
-) -> List[Dict[str, Any]]:
-    """
-    Load labeled emails from DuckDB or JSON file
-
-    Args:
-        data_path: Path to JSON file (legacy support)
-        db_path: Path to DuckDB database file
-
-    Returns:
-        List of labeled email dictionaries
-    """
-    # Prefer DuckDB if provided
-    if db_path:
-        if not os.path.exists(db_path):
-            print(f"Warning: DuckDB file not found: {db_path}")
-            return []
-
-        db = DatabaseConnection(db_path=db_path, auto_init=False)
-        conn = db.conn
-        # Query emails with labels from threads table
-        # Tags and Additional_tags are now stored in threads table
-        query = """
-        SELECT 
-            e.ID,
-            e.Subject,
-            e.Message,
-            e.Sender,
-            e.Timestamp,
-            e.has_attachments,
-            t.Tags,
-            t.Additional_tags
-        FROM emails e
-        LEFT JOIN threads t ON e.ThreadID = t.ThreadID
-        WHERE (t.Tags IS NOT NULL 
-            AND t.Tags != '[]'
-            AND t.Tags != '')
-            OR (t.Additional_tags IS NOT NULL 
-            AND t.Additional_tags != '[]'
-            AND t.Additional_tags != '')
-        """
-        result = conn.execute(query).fetchall()
-        columns = [
-            "id",
-            "subject",
-            "body",
-            "from",
-            "receivedDateTime",
-            "hasAttachments",
-            "tags",
-            "additional_tags",
-        ]
-
-        emails = []
-        for row in result:
-            email = dict(zip(columns, row))
-            # Convert hasAttachments boolean
-            email["hasAttachments"] = bool(email.get("hasAttachments", False))
-            # Ensure body key exists (Message is now body)
-            if "body" not in email or not email["body"]:
-                email["body"] = ""
-
-            # Parse tags from JSON array string
-            tags = email.get("tags", "[]") or "[]"
-            try:
-
-                tags = json.loads(tags) if isinstance(tags, str) else tags
-                if not isinstance(tags, list):
-                    tags = [tags] if tags else []
-            except:
-                tags = []
-
-            # Parse additional_tags from JSON array string
-            additional_tags = email.get("additional_tags", "[]") or "[]"
-            try:
-                additional_tags = (
-                    json.loads(additional_tags)
-                    if isinstance(additional_tags, str)
-                    else additional_tags
-                )
-                if not isinstance(additional_tags, list):
-                    additional_tags = [additional_tags] if additional_tags else []
-            except:
-                additional_tags = []
-
-            # Combine Tags and Additional_tags for training
-            combined_tags = tags + additional_tags
-
-            # Use first tag as primary label, or combine all if needed
-            if combined_tags:
-                email["label"] = (
-                    combined_tags[0]
-                    if len(combined_tags) == 1
-                    else ", ".join(combined_tags)
-                )
-            else:
-                email["label"] = None
-
-            # Only include emails with valid labels
-            if email.get("label"):
-                emails.append(email)
-
-        print(f"Loaded {len(emails)} labeled emails from DuckDB")
-        return emails
-
-    # Fallback to JSON file
-    if data_path and os.path.exists(data_path):
-        with open(data_path, "r", encoding="utf-8") as f:
-            emails = json.load(f)
-            print(f"Loaded {len(emails)} labeled emails from JSON")
-            return emails
-
-    if data_path:
-        print(f"Warning: {data_path} not found. Creating empty file.")
-        os.makedirs(os.path.dirname(data_path), exist_ok=True)
-        with open(data_path, "w") as f:
-            json.dump([], f)
-
-    return []
-
-
-def main():
-    """Main training function"""
-    # Load configuration
-    config_path = Path("config/training_config.json")
-    if config_path.exists():
-        with open(config_path, "r") as f:
-            config = json.load(f)
-    else:
-        config = {}
-        print("Warning: training_config.json not found. Using defaults.")
-
-    # Get paths from config
-    paths = config.get("paths", {})
-    labeled_data_path = paths.get("labeled_data", "data/labeled_emails.json")
-    db_path = paths.get("db_path", "data/emails.duckdb")
-    model_path = paths.get("model_output", "models/email_classifier.pkl")
-
-    # Create directories
-    Path("data").mkdir(exist_ok=True)
-    Path("models").mkdir(exist_ok=True)
-
-    # Load labeled emails (prefer DuckDB, fallback to JSON)
-    print("Loading labeled emails...")
-    labeled_emails = load_labeled_emails(
-        data_path=labeled_data_path if not os.path.exists(db_path) else None,
-        db_path=db_path if os.path.exists(db_path) else None,
-    )
-
-    if not labeled_emails:
-        print("No labeled emails found. Please label some emails first.")
-        print(f"Expected format in {labeled_data_path}:")
-        print(
-            """
-        [
-          {
-            "id": "email_id",
-            "subject": "Email subject",
-            "body": "Email body content",
-            "from": "sender@example.com",
-            "hasAttachments": false,
-            "attachments": [],
-            "importance": "normal",
-            "label": "category_name"
-          }
-        ]
-        """
-        )
-        return
-
-    # Initialize and train model
-    model = EmailLabelingModel(model_path=model_path, config=config)
-
-    try:
-        model.train(labeled_emails)
-        print("\nTraining completed successfully!")
-    except Exception as e:
-        print(f"Error during training: {e}")
-        import traceback
-
-        traceback.print_exc()
-        raise
-
-
-if __name__ == "__main__":
-    main()
