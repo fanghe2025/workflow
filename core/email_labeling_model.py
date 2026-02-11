@@ -55,7 +55,7 @@ class EmailLabelingModel:
         self.is_trained = False
         self.attachment_processor = (
             AttachmentProcessor()
-            if self.config.get("attachment_processing", {}).get("enabled", True)
+            if self.config.get("attachment_processing", {}).get("enabled", False)
             else None
         )
 

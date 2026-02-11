@@ -42,7 +42,6 @@ def load_emails_from_db(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
             t.Tags
         FROM emails e
         LEFT JOIN threads t ON e.ThreadID = t.ThreadID
-        LIMIT 10000
         """
         result = conn.execute(query).fetchall()
         columns = [

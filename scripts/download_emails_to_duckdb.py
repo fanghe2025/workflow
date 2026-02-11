@@ -17,14 +17,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from utils.common import load_config
-from core.graph_api_client import GraphAPIClient
+from utils.graph import get_authenticated_api_client
 from core.email_downloader import EmailDownloader
 
 
 def update_attachments(downloader: EmailDownloader):
     """Update attachments in DuckDB"""
 
-    sql = "SELECT ID FROM emails WHERE attachments = '[0, []]'"
+    sql = "SELECT ID FROM emails WHERE attachments = '[]' and has_attachments = 1"
     emails = downloader.conn.execute(sql).fetchall()
     print(f"Updating {len(emails)} attachments")
     for email in emails:
@@ -42,44 +42,17 @@ def update_attachments(downloader: EmailDownloader):
         downloader.conn.commit()
 
 
-def get_authenticated_api_client(config: dict) -> GraphAPIClient:
-    """Authenticate API client"""
-    # Get credentials from config
-    client_id = config.get("client_id")
-    client_secret = config.get("client_secret")
-    tenant_id = config.get("tenant_id")
-    user_email = config.get("user_email")
-
-    if not client_id or not client_secret or not tenant_id:
-        print("Credentials are required. Provide via config file")
-        return None
-
-    # Initialize tagger
-    api_client = GraphAPIClient(
-        client_id=client_id,
-        client_secret=client_secret,
-        tenant_id=tenant_id,
-        user_email=user_email,
-    )
-
-    # Authenticate
-    if not api_client.authenticate():
-        return None
-
-    return api_client
-
-
 def main(args):
     """Main function"""
 
     # Load config
-    config = load_config("config/graph_config.json")
-    api_client = get_authenticated_api_client(config)
+    api_client = get_authenticated_api_client()
     if not api_client:
         print("Failed to authenticate API client")
         return 1
 
     # Download and store emails
+    config = load_config("config/graph_config.json")
     db_path = config.get("db_path", "data/emails.duckdb")
     attachments_dir = config.get("attachments_dir", "data/attachments")
     filter_query = config.get("filter")
