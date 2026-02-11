@@ -186,28 +186,8 @@ class EmailLabelingModel:
         test_size = training_config.get("test_size", 0.2)
         random_state = training_config.get("random_state", 42)
 
-        # Check if stratification is possible (each class needs at least 2 samples)
-        stratify = None
-        if training_config.get("stratify", True):
-            from collections import Counter
-
-            label_counts = Counter(labels)
-            min_samples_per_class = min(label_counts.values())
-
-            if min_samples_per_class >= 2:
-                stratify = y
-                print(
-                    f"Using stratified split (min samples per class: {min_samples_per_class})"
-                )
-            else:
-                print(
-                    f"Warning: Cannot use stratified split. Some classes have only {min_samples_per_class} sample(s)."
-                )
-                print(f"Label distribution: {dict(label_counts)}")
-                print("Using non-stratified split instead.")
-
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=random_state, stratify=stratify
+            X, y, test_size=test_size, random_state=random_state
         )
 
         # Train model

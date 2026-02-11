@@ -14,7 +14,6 @@
   "training": {
     "test_size": 0.2,
     "random_state": 42,
-    "stratify": true
   },
   "paths": {
     "labeled_data": "data/labeled_emails.json",
