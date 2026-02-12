@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Dict, Any
 import json
 
+from mailparser_reply import EmailReplyParser
+
 
 def load_config(config_path: str = "config/graph_config.json") -> Dict[str, Any]:
     """Load Graph API configuration from JSON file"""
@@ -23,44 +25,73 @@ def load_config(config_path: str = "config/graph_config.json") -> Dict[str, Any]
         return {}
 
 
+def remove_from_closing(text):
+    return re.split(
+        r'\n\s*(best regards|kind regards|warm regards|regards|'
+        r'thanks and regards|many thanks|thank you|thanks|'
+        r'sincerely|yours sincerely|yours faithfully|'
+        r'best|cheers)\b.*',
+        text,
+        flags=re.IGNORECASE
+    )[0].strip()
+
+
+def clean_message(message: str) -> str:
+    """Clean a message by removing the closing and replies"""
+    mail_message = EmailReplyParser().read(text=message)
+    message = []
+    for reply in mail_message.replies:
+        res = clean_email_body(reply.full_body)
+        message.append(res)
+
+    return "\n".join(message)
+
+
 def clean_email_body(email_body: str) -> str:
     if not email_body:
         return ""
 
-    # Remove email headers: From:, Sent:, To:, Subject:
-    # Match lines that start with these headers (case-insensitive)
-    pattern = r"^(From:|Sent:|To:|Cc:|Subject:|Telephone:|Email:|-EXTERNAL EMAIL-|EXTERNAL EMAIL|LIONS GATE INTERNATIONAL).*$"
-    lines = email_body.split("\r\n")
-    cleaned_lines = []
-    skip_until_delimiter = False
+    # Remove > quote markers
+    text = re.sub(r'^\s*>+\s?', '', email_body, flags=re.MULTILINE)
 
-    for line in lines:
-        line = line.replace("\n", "").strip()
+    # remove external email
+    text = re.sub(
+        r'^.*external email.*$',
+        '',
+        text,
+        flags=re.IGNORECASE | re.MULTILINE
+    ).strip()
 
-        # Skip empty lines
-        if not line:
-            continue
+    # remove -------------------------
+    text = text.replace("-------------------------", "")
 
-        # Check if we should start skipping (found [Premeire Digital Services])
-        if "[Premeire Digital Services]" in line:
-            skip_until_delimiter = True
-            continue
+    # remove mailto lines
+    text = re.sub(
+        r'^.*mailto:.*$',
+        '',
+        text,
+        flags=re.IGNORECASE | re.MULTILINE
+    ).strip()
 
-        # Check if we found the delimiter (stop skipping)
-        if skip_until_delimiter and "_____________________" in line:
-            skip_until_delimiter = False
+    # Remove greeting line (if first line starts with Hi/Hello/etc.)
+    text = re.sub(
+        r'^(hi|hello|hey|dear)\b.*$',
+        '',
+        text.strip(),
+        flags=re.IGNORECASE | re.MULTILINE
+    )
 
-        # Skip lines while in removal mode
-        if skip_until_delimiter:
-            continue
+    # Remove closing phrases and everything after
+    text = re.split(
+        r'\n\s*(best regards|kind regards|warm regards|regards|'
+        r'thanks and regards|many thanks|thank you|thanks|'
+        r'sincerely|yours sincerely|yours faithfully|'
+        r'best|cheers)\b.*',
+        text,
+        flags=re.IGNORECASE
+    )[0].strip()
 
-        # Skip email headers
-        if re.match(pattern, line, re.IGNORECASE):
-            continue
+    # Remove extra blank lines
+    text = re.sub(r'\n\s*\n', '\n', text).strip()
 
-        if "m:" in line.lower() and "e:" in line.lower():
-            continue
-
-        cleaned_lines.append(line)
-
-    return "\n".join(cleaned_lines).strip()
+    return text

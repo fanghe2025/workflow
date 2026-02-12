@@ -16,12 +16,12 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from utils.common import load_config
+from utils.common import load_config, clean_message
 from utils.graph import get_authenticated_api_client
 from core.email_downloader import EmailDownloader
 
 
-def update_attachments(downloader: EmailDownloader):
+def update_db_attachments(downloader: EmailDownloader):
     """Update attachments in DuckDB"""
 
     sql = "SELECT ID FROM emails WHERE attachments = '[]' and has_attachments = 1"
@@ -36,6 +36,26 @@ def update_attachments(downloader: EmailDownloader):
             "UPDATE emails SET attachments = ? WHERE ID = ?",
             [
                 json.dumps(attachment_names) if attachment_names else "[]",
+                email_id,
+            ],
+        )
+        downloader.conn.commit()
+
+
+def update_db_messages(downloader: EmailDownloader):
+    """Update messages in DuckDB"""
+
+    sql = "SELECT ID, raw_json FROM emails"
+    emails = downloader.conn.execute(sql).fetchall()
+    print(f"Updating {len(emails)} messages")
+    for email in emails:
+        email_id = email[0]
+        raw_json = json.loads(email[1])
+        message = clean_message(raw_json.get("body", {}).get("content", ""))
+        downloader.conn.execute(
+            "UPDATE emails SET Message = ? WHERE ID = ?",
+            [
+                message,
                 email_id,
             ],
         )
@@ -64,7 +84,9 @@ def main(args):
 
     try:
         if args.update_attachments:
-            update_attachments(downloader)
+            update_db_attachments(downloader)
+        if args.update_messages:
+            update_db_messages(downloader)
         else:
             for folder in ("inbox", "archive"):
                 downloader.download_and_store(
@@ -79,6 +101,7 @@ def main(args):
 if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description="Reddit scraper")
     arg_parser.add_argument("--update-attachments", action="store_true")
+    arg_parser.add_argument("--update-messages", action="store_true")
     args = arg_parser.parse_args()
 
     sys.exit(main(args))
