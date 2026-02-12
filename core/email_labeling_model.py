@@ -10,11 +10,13 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any
 import numpy as np
-from scipy.sparse import hstack
+from scipy.sparse import hstack, csr_matrix
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MultiLabelBinarizer
+from sklearn.multiclass import OneVsRestClassifier
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, accuracy_score
+from sklearn.metrics import accuracy_score, classification_report
 import joblib
 
 # Add parent directory to path for imports
@@ -44,18 +46,21 @@ class EmailLabelingModel:
         )
 
         model_config = self.config.get("model", {})
-        self.model = RandomForestClassifier(
-            n_estimators=model_config.get("n_estimators", 100),
-            max_depth=model_config.get("max_depth", 20),
-            random_state=model_config.get("random_state", 42),
-            n_jobs=-1,
+        # Using OneVsRestClassifier for multi-label classification
+        self.model = OneVsRestClassifier(
+            RandomForestClassifier(
+                n_estimators=model_config.get("n_estimators", 100),
+                max_depth=model_config.get("max_depth", 20),
+                random_state=model_config.get("random_state", 42),
+                n_jobs=-1,
+            )
         )
         self.label_encoder = {}
         self.reverse_label_encoder = {}
         self.is_trained = False
         self.attachment_processor = (
             AttachmentProcessor()
-            if self.config.get("attachment_processing", {}).get("enabled", False)
+            if self.config.get("attachment_processing", {}).get("enabled", True)
             else None
         )
 
@@ -129,14 +134,19 @@ class EmailLabelingModel:
 
         # Filter emails with labels
         emails = [e for e in labeled_emails if "Tags" in e]
-        labels = [",".join(e["Tags"]) for e in emails]
+        labels = [e["Tags"] for e in emails]
 
         if not emails:
             raise ValueError("No emails with labels found")
 
         print(f"Found {len(emails)} labeled emails for training")
 
-        # Process attachments
+        # Binarize labels for multi-label classification
+        mlb = MultiLabelBinarizer()
+        y = mlb.fit_transform(labels)
+        print(f"Labels: {mlb.classes_}")
+
+        # Process attachments if necessary
         if self.attachment_processor:
             for email in emails:
                 if email.get("hasAttachments", False) and email.get("attachments"):
@@ -157,31 +167,24 @@ class EmailLabelingModel:
                                     attachment_texts.append(result["text_content"])
                         email["attachment_texts"] = attachment_texts
 
-        # Create label encoder
-        unique_labels = sorted(set(labels))
-        self.label_encoder = {label: idx for idx, label in enumerate(unique_labels)}
-        self.reverse_label_encoder = {
-            idx: label for label, idx in self.label_encoder.items()
-        }
-
-        print(f"Labels: {unique_labels}")
+        # Save the reverse label encoder for later use
+        self.reverse_label_encoder = {i: label for i, label in enumerate(mlb.classes_)}
+        self.label_encoder = {label: i for i, label in enumerate(mlb.classes_)}
 
         # Prepare text features
         print("Vectorizing text content...")
         texts = self.prepare_text_features(emails)
         X_text = self.vectorizer.fit_transform(texts)
 
-        # Prepare additional features
+        # Combine text features with any additional features (if needed)
         print("Extracting additional features...")
         X_additional = self.prepare_additional_features(emails)
 
         # Combine features
-        X = hstack([X_text, X_additional])
+        X = hstack([X_text, csr_matrix(X_additional)])
 
-        # Encode labels
-        y = np.array([self.label_encoder[label] for label in labels])
 
-        # Split data
+        # Split data into training and test sets
         training_config = self.config.get("training", {})
         test_size = training_config.get("test_size", 0.2)
         random_state = training_config.get("random_state", 42)
@@ -197,25 +200,13 @@ class EmailLabelingModel:
         print(f"\nTraining model on {n_train_samples} samples...")
         self.model.fit(X_train, y_train)
 
-        # Evaluate
+        # Evaluate the model
         y_pred = self.model.predict(X_test)
         accuracy = accuracy_score(y_test, y_pred)
 
         print(f"\nModel Accuracy: {accuracy:.4f}")
         print("\nClassification Report:")
-
-        # Get unique classes present in test set
-        unique_test_classes = sorted(set(y_test) | set(y_pred))
-        target_names = [self.reverse_label_encoder[i] for i in unique_test_classes]
-
-        print(
-            classification_report(
-                y_test,
-                y_pred,
-                labels=unique_test_classes,
-                target_names=target_names,
-            )
-        )
+        print(classification_report(y_test, y_pred, target_names=mlb.classes_))
 
         self.is_trained = True
 
@@ -223,7 +214,7 @@ class EmailLabelingModel:
         self.save()
 
     def predict(self, email: Dict[str, Any]) -> Dict[str, Any]:
-        """Predict label for a single email"""
+        """Predict labels for a single email (multi-label)"""
         if not self.is_trained:
             raise ValueError("Model not trained. Please train the model first.")
 
@@ -242,35 +233,31 @@ class EmailLabelingModel:
                             attachment_texts.append(result["text_content"])
                 email["attachment_texts"] = attachment_texts
 
-        # Prepare text
+        # Prepare text features
         texts = self.prepare_text_features([email])
         X_text = self.vectorizer.transform(texts)
 
-        # Additional features
+        # Prepare additional features (if necessary)
         X_additional = self.prepare_additional_features([email])
 
-        # Combine
-        X = hstack([X_text, X_additional])
+        # Ensure X_additional has the same number of rows as X_text
+        if X_additional.shape[0] != X_text.shape[0]:
+            raise ValueError("The number of samples in X_additional does not match X_text.")
+
+        # Combine text and additional features
+        X = hstack([X_text, csr_matrix(X_additional)])
 
         # Predict
-        prediction_idx = self.model.predict(X)[0]
-        probabilities = self.model.predict_proba(X)[0]
+        y_pred = self.model.predict(X)
 
-        label = self.reverse_label_encoder[prediction_idx]
-        confidence = float(max(probabilities))
+        # Convert predictions to tags
+        predicted_labels = [
+            self.reverse_label_encoder[i]
+            for i in range(len(y_pred[0]))
+            if y_pred[0][i] == 1 and self.reverse_label_encoder[i] != "No label"
+        ]
 
-        # Convert all probabilities to native Python types for JSON serialization
-        all_probs = {}
-        for i, prob in enumerate(probabilities):
-            label_name = self.reverse_label_encoder[i]
-            # Ensure it's a native Python float
-            all_probs[label_name] = float(prob)
-
-        return {
-            "label": str(label),
-            "confidence": confidence,
-            "all_probabilities": all_probs,
-        }
+        return predicted_labels
 
     def save(self):
         """Save the trained model"""
