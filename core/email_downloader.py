@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from core.db import DatabaseConnection
 from core.graph_api_client import GraphAPIClient
-from utils.common import clean_email_body
+from utils.common import clean_email_body, clean_message
 
 
 logger = logging.getLogger(__name__)
@@ -309,7 +309,7 @@ class EmailDownloader:
         """
         try:
             body = email.get("body", {})
-            body_content = clean_email_body(body.get("content", ""))
+            body_content = clean_message(body.get("content", ""))
             from_info = email.get("from", {}).get("emailAddress", {})
             sender = from_info.get("address", "")
             received_at = email.get("receivedDateTime")

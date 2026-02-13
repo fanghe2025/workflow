@@ -83,7 +83,7 @@ def clean_email_body(email_body: str) -> str:
 
     # Remove closing phrases and everything after
     text = re.split(
-        r'\n\s*(best regards|kind regards|warm regards|regards|'
+        r'\n\s*(best regards|all the best|kind regards|warm regards|regards|'
         r'thanks and regards|many thanks|thank you|thanks|'
         r'sincerely|yours sincerely|yours faithfully|'
         r'best|cheers)\b.*',
