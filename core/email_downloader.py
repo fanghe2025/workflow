@@ -1,8 +1,18 @@
+import csv
 import logging
 import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+try:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+
+    OPENPYXL_AVAILABLE = True
+except ImportError:
+    OPENPYXL_AVAILABLE = False
 
 from core.db import DatabaseConnection
 from core.graph_api_client import GraphAPIClient
@@ -424,6 +434,80 @@ class EmailDownloader:
         )
 
         return results
+
+    def save_xlsx(
+        self, emails: List[Dict[str, Any]] = None, output_path: str = "data/emails.xlsx"
+    ):
+        """Save emails to Excel file"""
+
+        if not OPENPYXL_AVAILABLE:
+            raise ImportError(
+                "openpyxl is required for Excel export. Install it with: pip install openpyxl"
+            )
+
+        if emails is None:
+            sql = """
+                SELECT
+                    ID,
+                    emails.ThreadID,
+                    threads.Tags,
+                    Sender,
+                    Subject,
+                    attachments,
+                    Message,
+                FROM emails
+                JOIN threads ON emails.ThreadID = threads.ThreadID
+            """
+            emails = self.conn.execute(sql).fetchall()
+
+        # Create workbook and worksheet
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Emails"
+
+        # Write headers
+        headers = [
+            "ID",
+            "ThreadID",
+            "Tags",
+            "Sender",
+            "Subject",
+            "attachments",
+            "Message",
+        ]
+        for col_num, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_num)
+            cell.value = header
+            cell.font = Font(bold=True)
+
+        # Write data
+        for row_num, email in enumerate(emails, 2):
+            for col_num, value in enumerate(email, 1):
+                cell = ws.cell(row=row_num, column=col_num)
+                # Handle None values and ensure proper encoding
+                if value is None:
+                    cell.value = ""
+                else:
+                    # Convert to string and handle Unicode
+                    cell.value = str(value)
+
+        # Auto-adjust column widths
+        for col_num, header in enumerate(headers, 1):
+            column_letter = get_column_letter(col_num)
+            max_length = 0
+            # Check header length
+            max_length = max(max_length, len(str(header)))
+            # Check data lengths in this column
+            for row in ws[column_letter]:
+                if row.value:
+                    max_length = max(max_length, len(str(row.value)))
+            # Set column width (add some padding)
+            ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
+
+        # Save file
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        wb.save(output_path)
+        logger.info(f"Saved {len(emails)} emails to {output_path}")
 
     def close(self) -> None:
         """Close database connection."""

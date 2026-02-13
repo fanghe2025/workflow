@@ -42,6 +42,57 @@ def update_attachments(downloader: EmailDownloader):
         downloader.conn.commit()
 
 
+def update_thread_tags(downloader: EmailDownloader):
+    """Update tags in threads table, replacing 'Broadcast' with 'Broadcast-Linear'"""
+
+    # Get all threads with tags
+    sql = "SELECT ThreadID, Tags FROM threads WHERE Tags != '[]'"
+    threads = downloader.conn.execute(sql).fetchall()
+
+    print(f"Found {len(threads)} threads with tags")
+    updated_count = 0
+
+    for thread_id, tags_str in threads:
+        if not tags_str:
+            continue
+
+        try:
+            # Parse tags (format: "[tag1, tag2]" or similar)
+            tags = [t.strip() for t in tags_str.strip("[]").split(",") if t.strip()]
+
+            # Replace "Broadcast" with "Broadcast-Linear"
+            updated_tags = []
+            changed = False
+            for tag in tags:
+                if tag == "Broadcast":
+                    updated_tags.append("Broadcast-Linear")
+                    changed = True
+                else:
+                    updated_tags.append(tag)
+
+            if changed:
+                # Reconstruct tags string in the same format
+                # Check if original had brackets
+                if tags_str.strip().startswith("[") and tags_str.strip().endswith("]"):
+                    new_tags_str = "[" + ", ".join(updated_tags) + "]"
+                else:
+                    new_tags_str = ", ".join(updated_tags)
+
+                # Update the thread
+                update_sql = "UPDATE threads SET Tags = ? WHERE ThreadID = ?"
+                downloader.conn.execute(update_sql, [new_tags_str, thread_id])
+                updated_count += 1
+
+        except Exception as e:
+            print(f"Error processing thread {thread_id}: {e}")
+            continue
+
+    downloader.conn.commit()
+    print(
+        f"Updated {updated_count} threads (replaced 'Broadcast' with 'Broadcast-Linear')"
+    )
+
+
 def main(args):
     """Main function"""
 
@@ -65,12 +116,17 @@ def main(args):
     try:
         if args.update_attachments:
             update_attachments(downloader)
+        elif args.update_tags:
+            update_thread_tags(downloader)
+        elif args.save_xlsx:
+            downloader.save_xlsx()
         else:
             for folder in ("inbox", "archive"):
                 downloader.download_and_store(
                     folder=folder,
                     filter_query=filter_query,
                     batch_size=batch_size,
+                    limit=1000,
                 )
     finally:
         downloader.close()
@@ -79,6 +135,8 @@ def main(args):
 if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description="Reddit scraper")
     arg_parser.add_argument("--update-attachments", action="store_true")
+    arg_parser.add_argument("--update-tags", action="store_true")
+    arg_parser.add_argument("--save-xlsx", action="store_true")
     args = arg_parser.parse_args()
 
     sys.exit(main(args))

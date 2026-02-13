@@ -15,6 +15,9 @@
     "test_size": 0.2,
     "random_state": 42
   },
+  "prediction": {
+    "threshold": 0.1
+  },
   "paths": {
     "labeled_data": "data/labeled_emails.json",
     "db_path": "data/emails.duckdb",

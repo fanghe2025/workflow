@@ -161,7 +161,6 @@ Emails are stored in JSON format with the following structure:
       "text_content": "Extracted text from attachment"
     }
   ],
-  "importance": "normal",
   "label": "category_name"  // Added during labeling
 }
 ```

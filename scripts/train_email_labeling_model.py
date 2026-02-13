@@ -9,6 +9,7 @@ from typing import List, Dict, Any, Optional
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from core.constants import NO_LABEL
 from core.db import DatabaseConnection
 from core.email_labeling_model import EmailLabelingModel
 
@@ -33,6 +34,7 @@ def load_emails_from_db(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
         db = DatabaseConnection(db_path=db_path, auto_init=False)
         conn = db.connect()
         # Query emails with labels from threads table
+        # Get the first email (oldest Timestamp) for each thread
         query = """
         SELECT 
             e.Subject,
@@ -42,6 +44,8 @@ def load_emails_from_db(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
             t.Tags
         FROM emails e
         LEFT JOIN threads t ON e.ThreadID = t.ThreadID
+        WHERE t.Tags != '[]'
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY e.ThreadID ORDER BY e.Timestamp ASC) = 1
         """
         result = conn.execute(query).fetchall()
         columns = [
@@ -57,17 +61,15 @@ def load_emails_from_db(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
             email = dict(zip(columns, row))
 
             # Parse tags from JSON array string
-            email["importance"] = "normal"
             tags = email["Tags"]
             try:
                 tags = [t.strip() for t in tags.strip("[]").split(",") if t.strip()]
                 if len(tags) == 0:
-                    email["Tags"] = ["No label"]
+                    email["Tags"] = [NO_LABEL]
                 else:
                     email["Tags"] = tags
-                    email["importance"] = "high"
             except Exception as e:
-                email["Tags"] = ["No label"]
+                email["Tags"] = [NO_LABEL]
 
             # Parse attachments from JSON array string
             attachments = email["attachments"]

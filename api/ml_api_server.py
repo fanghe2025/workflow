@@ -17,7 +17,7 @@ import logging
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from ml_training.train_model import EmailLabelingModel
+from core.email_labeling_model import EmailLabelingModel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -93,9 +93,6 @@ class EmailRequest(BaseModel):
     attachments: Optional[List[Attachment]] = Field(
         default_factory=list, description="Email attachments"
     )
-    importance: Optional[str] = Field(
-        default="normal", description="Email importance level"
-    )
     id: Optional[str] = Field(default=None, description="Email ID")
 
     class Config:
@@ -103,7 +100,7 @@ class EmailRequest(BaseModel):
 
 
 class PredictionResponse(BaseModel):
-    label: str = Field(description="Predicted label")
+    labels: List[str] = Field(description="Predicted labels (multi-label)")
     confidence: float = Field(description="Prediction confidence score")
     all_probabilities: Dict[str, float] = Field(
         description="Probabilities for all labels"
@@ -116,7 +113,7 @@ class BatchEmailRequest(BaseModel):
 
 class BatchPredictionItem(BaseModel):
     email_id: Optional[str] = None
-    label: Optional[str] = None
+    labels: Optional[List[str]] = None
     confidence: Optional[float] = None
     all_probabilities: Optional[Dict[str, float]] = None
     error: Optional[str] = None
@@ -170,20 +167,26 @@ async def predict(email: EmailRequest):
 
         # Convert Pydantic model to dict for model.predict()
         email_dict = email.model_dump(by_alias=True, exclude_none=True)
-        # Ensure 'from' key is present (not 'from_')
-        if "from_" in email_dict:
-            email_dict["from"] = email_dict.pop("from_")
 
-        # Map 'body' to 'body_content' for consistency with DuckDB schema
-        if "body" in email_dict and "body_content" not in email_dict:
-            email_dict["body_content"] = email_dict["body"]
+        # Map API format to model format
+        model_email_dict = {
+            "Subject": email_dict.get("subject", ""),
+            "Message": email_dict.get("body", ""),
+            "Sender": email_dict.get("from", email_dict.get("from_", "")),
+            "attachments": [
+                att.get("name", "")
+                for att in email_dict.get("attachments", [])
+                if att.get("name")
+            ],
+            "hasAttachments": email_dict.get("hasAttachments", False),
+        }
 
         # Predict
-        prediction = model.predict(email_dict)
+        prediction = model.predict(model_email_dict)
 
         # Ensure all values are JSON serializable (convert numpy types to native Python types)
         prediction_clean = {
-            "label": str(prediction.get("label", "")),
+            "labels": prediction.get("labels", []),  # List of predicted labels
             "confidence": float(prediction.get("confidence", 0.0)),
             "all_probabilities": {
                 str(k): float(v)
@@ -225,14 +228,21 @@ async def predict_batch(batch_request: BatchEmailRequest):
             try:
                 # Convert Pydantic model to dict
                 email_dict = email.model_dump(by_alias=True, exclude_none=True)
-                if "from_" in email_dict:
-                    email_dict["from"] = email_dict.pop("from_")
 
-                # Map 'body' to 'body_content' for consistency with DuckDB schema
-                if "body" in email_dict and "body_content" not in email_dict:
-                    email_dict["body_content"] = email_dict["body"]
+                # Map API format to model format
+                model_email_dict = {
+                    "Subject": email_dict.get("subject", ""),
+                    "Message": email_dict.get("body", ""),
+                    "Sender": email_dict.get("from", email_dict.get("from_", "")),
+                    "attachments": [
+                        att.get("name", "")
+                        for att in email_dict.get("attachments", [])
+                        if att.get("name")
+                    ],
+                    "hasAttachments": email_dict.get("hasAttachments", False),
+                }
 
-                prediction = model.predict(email_dict)
+                prediction = model.predict(model_email_dict)
                 predictions.append(BatchPredictionItem(email_id=email.id, **prediction))
             except Exception as e:
                 logger.warning(
@@ -260,7 +270,7 @@ async def model_info():
 
     return ModelInfoResponse(
         is_trained=model.is_trained,
-        labels=list(model.label_encoder.keys()) if model.label_encoder else [],
+        labels=model.label_list if hasattr(model, "label_list") else [],
         model_path=model.model_path,
     )
 

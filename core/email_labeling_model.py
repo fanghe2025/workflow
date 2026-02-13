@@ -10,17 +10,19 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any
 import numpy as np
-from scipy.sparse import hstack
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, accuracy_score
+from sklearn.multioutput import MultiOutputClassifier
+from sklearn.metrics import classification_report, accuracy_score, hamming_loss
+from sklearn.preprocessing import MultiLabelBinarizer
 import joblib
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.attachment_processor import AttachmentProcessor
+from core.constants import NO_LABEL
 
 
 class EmailLabelingModel:
@@ -42,16 +44,19 @@ class EmailLabelingModel:
             min_df=self.config.get("vectorizer", {}).get("min_df", 2),
             max_df=self.config.get("vectorizer", {}).get("max_df", 0.95),
         )
+        prediction_config = self.config.get("prediction", {})
+        self.prediction_threshold = prediction_config.get("threshold", 0.1)
 
         model_config = self.config.get("model", {})
-        self.model = RandomForestClassifier(
+        base_classifier = RandomForestClassifier(
             n_estimators=model_config.get("n_estimators", 100),
             max_depth=model_config.get("max_depth", 20),
             random_state=model_config.get("random_state", 42),
             n_jobs=-1,
         )
-        self.label_encoder = {}
-        self.reverse_label_encoder = {}
+        self.model = MultiOutputClassifier(base_classifier, n_jobs=-1)
+        self.label_binarizer = MultiLabelBinarizer()
+        self.label_list = []  # Store list of all unique labels
         self.is_trained = False
         self.attachment_processor = (
             AttachmentProcessor()
@@ -70,7 +75,8 @@ class EmailLabelingModel:
             sender = email["Sender"]
             attachment_names = email["attachments"]
 
-            text_parts = [subject, body, sender]
+            # text_parts = [subject, body, sender]
+            text_parts = [subject, sender]
             if attachment_names:
                 text_parts.append(",".join(attachment_names))
 
@@ -86,50 +92,14 @@ class EmailLabelingModel:
 
         return texts
 
-    def prepare_additional_features(self, emails: List[Dict[str, Any]]) -> np.ndarray:
-        """Extract additional non-text features"""
-        features = []
-
-        for email in emails:
-            # Extract domain from sender
-            from_email = email["Sender"]
-            domain = from_email.split("@")[-1] if "@" in from_email else ""
-
-            # Count attachments
-            num_attachments = len(email["attachments"])
-            has_attachments = 1 if num_attachments > 0 else 0
-
-            # Attachment text length
-            attachment_text_length = 0
-            if email.get("attachment_texts"):
-                attachment_text_length = sum(
-                    len(text) for text in email.get("attachment_texts", [])
-                )
-
-            # Importance
-            importance = email.get("importance", "normal")
-            is_high_importance = 1 if importance == "high" else 0
-
-            # Feature vector
-            feat = [
-                is_high_importance,
-                has_attachments,
-                num_attachments,
-                len(domain),  # Domain length as feature
-                attachment_text_length,
-            ]
-            features.append(feat)
-
-        return np.array(features)
-
     def train(self, labeled_emails: List[Dict[str, Any]]):
         """Train the model on labeled email data"""
         if not labeled_emails:
             raise ValueError("No labeled emails provided for training")
 
         # Filter emails with labels
-        emails = [e for e in labeled_emails if "Tags" in e]
-        labels = [",".join(e["Tags"]) for e in emails]
+        emails = [e for e in labeled_emails if "Tags" in e and e["Tags"]]
+        labels = [e["Tags"] for e in emails]  # Keep as list of lists
 
         if not emails:
             raise ValueError("No emails with labels found")
@@ -157,29 +127,25 @@ class EmailLabelingModel:
                                     attachment_texts.append(result["text_content"])
                         email["attachment_texts"] = attachment_texts
 
-        # Create label encoder
-        unique_labels = sorted(set(labels))
-        self.label_encoder = {label: idx for idx, label in enumerate(unique_labels)}
-        self.reverse_label_encoder = {
-            idx: label for label, idx in self.label_encoder.items()
-        }
+        # Get all unique labels and create binarizer
+        all_unique_labels = sorted(
+            set(label for label_list in labels for label in label_list)
+        )
+        self.label_list = all_unique_labels
 
-        print(f"Labels: {unique_labels}")
+        # Fit binarizer on the actual label lists from training data
+        self.label_binarizer.fit(labels)
+
+        print(f"Unique labels: {all_unique_labels}")
+        print(f"Total unique labels: {len(all_unique_labels)}")
 
         # Prepare text features
         print("Vectorizing text content...")
         texts = self.prepare_text_features(emails)
-        X_text = self.vectorizer.fit_transform(texts)
+        X = self.vectorizer.fit_transform(texts)
 
-        # Prepare additional features
-        print("Extracting additional features...")
-        X_additional = self.prepare_additional_features(emails)
-
-        # Combine features
-        X = hstack([X_text, X_additional])
-
-        # Encode labels
-        y = np.array([self.label_encoder[label] for label in labels])
+        # Encode labels as binary matrix (multi-label format)
+        y = self.label_binarizer.transform(labels)
 
         # Split data
         training_config = self.config.get("training", {})
@@ -199,28 +165,72 @@ class EmailLabelingModel:
 
         # Evaluate
         y_pred = self.model.predict(X_test)
-        accuracy = accuracy_score(y_test, y_pred)
 
-        print(f"\nModel Accuracy: {accuracy:.4f}")
-        print("\nClassification Report:")
+        # Calculate metrics for multi-label classification
+        hamming = hamming_loss(y_test, y_pred)
+        # Subset accuracy (exact match)
+        subset_accuracy = accuracy_score(y_test, y_pred)
 
-        # Get unique classes present in test set
-        unique_test_classes = sorted(set(y_test) | set(y_pred))
-        target_names = [self.reverse_label_encoder[i] for i in unique_test_classes]
+        print(f"\nHamming Loss: {hamming:.4f} (lower is better)")
+        print(f"Subset Accuracy (exact match): {subset_accuracy:.4f}")
+        print("\nPer-Label Classification Report:")
 
-        print(
-            classification_report(
-                y_test,
-                y_pred,
-                labels=unique_test_classes,
-                target_names=target_names,
-            )
-        )
+        # Print classification report for each label
+        for i, label_name in enumerate(self.label_list):
+            y_test_label = y_test[:, i]
+            y_pred_label = y_pred[:, i]
+
+            # Check if both classes are present
+            unique_classes = sorted(set(y_test_label) | set(y_pred_label))
+
+            if len(unique_classes) == 1:
+                # Only one class present, skip detailed report
+                print(f"\n--- Label: {label_name} ---")
+                print(
+                    f"  All samples predicted as: {'Present' if unique_classes[0] == 1 else 'Not Present'}"
+                )
+                print(f"  Accuracy: {accuracy_score(y_test_label, y_pred_label):.4f}")
+            else:
+                # Both classes present, print full report
+                print(f"\n--- Label: {label_name} ---")
+                print(
+                    classification_report(
+                        y_test_label,
+                        y_pred_label,
+                        target_names=["Not " + label_name, label_name],
+                        labels=[0, 1],
+                        zero_division=0,
+                    )
+                )
 
         self.is_trained = True
 
         # Save model
         self.save()
+
+    def clean_no_label(
+        self, labels: List[str], all_probs: Dict[str, float]
+    ) -> List[str]:
+        """Remove 'No Label' from predicted labels if better alternatives exist"""
+        if not labels:
+            return labels
+
+        if NO_LABEL not in labels or len(labels) == 1:
+            return labels
+
+        if labels[0] == NO_LABEL:
+            no_label_prob = all_probs[NO_LABEL]
+            second_prob = all_probs[labels[1]]
+            if no_label_prob - second_prob < 0.1:
+                return [labels[1]]
+            if no_label_prob - second_prob > 0.3:
+                return [labels[0]]
+        cleaned = []
+        for label in labels:
+            if label == NO_LABEL:
+                break
+            cleaned.append(label)
+        return cleaned
 
     def predict(self, email: Dict[str, Any]) -> Dict[str, Any]:
         """Predict label for a single email"""
@@ -244,31 +254,41 @@ class EmailLabelingModel:
 
         # Prepare text
         texts = self.prepare_text_features([email])
-        X_text = self.vectorizer.transform(texts)
+        X = self.vectorizer.transform(texts)
 
-        # Additional features
-        X_additional = self.prepare_additional_features([email])
+        # Predict (returns binary matrix for multi-label)
+        # prediction_binary = self.model.predict(X)[0]
+        probabilities = self.model.predict_proba(X)  # List of arrays, one per label
 
-        # Combine
-        X = hstack([X_text, X_additional])
-
-        # Predict
-        prediction_idx = self.model.predict(X)[0]
-        probabilities = self.model.predict_proba(X)[0]
-
-        label = self.reverse_label_encoder[prediction_idx]
-        confidence = float(max(probabilities))
-
-        # Convert all probabilities to native Python types for JSON serialization
+        # Calculate probabilities for all labels
         all_probs = {}
-        for i, prob in enumerate(probabilities):
-            label_name = self.reverse_label_encoder[i]
-            # Ensure it's a native Python float
-            all_probs[label_name] = float(prob)
+        label_prob_pairs = []
+        for i, label_name in enumerate(self.label_list):
+            # Get probability for this label being present
+            # probabilities[i] is shape (1, 2) for binary classification
+            # [0][1] is probability of label being present, [0][0] is probability of not present
+            prob_array = probabilities[i]
+            if prob_array.shape[1] > 1:
+                label_prob = float(
+                    prob_array[0][1]
+                )  # Probability of label being present
+            else:
+                label_prob = float(prob_array[0][0])
+            all_probs[label_name] = label_prob
+            label_prob_pairs.append((label_name, label_prob))
+
+        # Sort by probability (descending) and get top 3 labels
+        label_prob_pairs.sort(key=lambda x: x[1], reverse=True)
+        top_labels = [
+            label
+            for label, prob in label_prob_pairs[:3]
+            if prob > self.prediction_threshold
+        ]
 
         return {
-            "label": str(label),
-            "confidence": confidence,
+            "labels": self.clean_no_label(
+                top_labels, all_probs
+            ),  # Top predicted labels by probability
             "all_probabilities": all_probs,
         }
 
@@ -278,8 +298,8 @@ class EmailLabelingModel:
         model_data = {
             "model": self.model,
             "vectorizer": self.vectorizer,
-            "label_encoder": self.label_encoder,
-            "reverse_label_encoder": self.reverse_label_encoder,
+            "label_binarizer": self.label_binarizer,
+            "label_list": self.label_list,
         }
         joblib.dump(model_data, self.model_path)
         print(f"Model saved to {self.model_path}")
@@ -292,7 +312,21 @@ class EmailLabelingModel:
         model_data = joblib.load(self.model_path)
         self.model = model_data["model"]
         self.vectorizer = model_data["vectorizer"]
-        self.label_encoder = model_data["label_encoder"]
-        self.reverse_label_encoder = model_data["reverse_label_encoder"]
+
+        # Handle backward compatibility with old models
+        if "label_binarizer" in model_data:
+            self.label_binarizer = model_data["label_binarizer"]
+            self.label_list = model_data["label_list"]
+        else:
+            # Old format - convert to new format
+            self.label_encoder = model_data.get("label_encoder", {})
+            self.reverse_label_encoder = model_data.get("reverse_label_encoder", {})
+            self.label_list = sorted(self.reverse_label_encoder.values())
+            # Create a new binarizer (will need retraining for multi-label)
+            self.label_binarizer = MultiLabelBinarizer()
+            print(
+                "Warning: Old model format detected. Multi-label support may be limited."
+            )
+
         self.is_trained = True
         print(f"Model loaded from {self.model_path}")

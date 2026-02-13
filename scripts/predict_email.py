@@ -12,6 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from core.constants import NO_LABEL
 from core.email_labeling_model import EmailLabelingModel
 from utils.graph import get_authenticated_api_client
 from utils.common import clean_email_body
@@ -52,7 +53,14 @@ def main():
                 for attachment in attachments:
                     data["attachments"].append(attachment.get("name"))
             prediction = model.predict(data)
-            print(f"{str(tags):<50} | {str(prediction):<50}")
+            predicted_labels = []
+            for label in prediction["labels"]:
+                prob = prediction["all_probabilities"][label]
+                if label == NO_LABEL:
+                    label = ""
+                # predicted_labels.append(f"{label}({prob:.4f})")
+                predicted_labels.append(label)
+            print(f"{str(tags):<50} | {str(predicted_labels):<50}")
             print("-" * 100)
         print("\nTraining completed successfully!")
     except Exception as e:
