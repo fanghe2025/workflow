@@ -208,30 +208,6 @@ class EmailLabelingModel:
         # Save model
         self.save()
 
-    def clean_no_label(
-        self, labels: List[str], all_probs: Dict[str, float]
-    ) -> List[str]:
-        """Remove 'No Label' from predicted labels if better alternatives exist"""
-        if not labels:
-            return labels
-
-        if NO_LABEL not in labels or len(labels) == 1:
-            return labels
-
-        if labels[0] == NO_LABEL:
-            no_label_prob = all_probs[NO_LABEL]
-            second_prob = all_probs[labels[1]]
-            if no_label_prob - second_prob < 0.1:
-                return [labels[1]]
-            if no_label_prob - second_prob > 0.3:
-                return [labels[0]]
-        cleaned = []
-        for label in labels:
-            if label == NO_LABEL:
-                break
-            cleaned.append(label)
-        return cleaned
-
     def predict(self, email: Dict[str, Any]) -> Dict[str, Any]:
         """Predict label for a single email"""
         if not self.is_trained:
@@ -286,9 +262,7 @@ class EmailLabelingModel:
         ]
 
         return {
-            "labels": self.clean_no_label(
-                top_labels, all_probs
-            ),  # Top predicted labels by probability
+            "labels": top_labels,
             "all_probabilities": all_probs,
         }
 
