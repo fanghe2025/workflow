@@ -16,7 +16,7 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from utils.common import load_config
+from utils.common import load_config, clean_message
 from utils.graph import get_authenticated_api_client
 from core.email_downloader import EmailDownloader
 
@@ -93,6 +93,26 @@ def update_thread_tags(downloader: EmailDownloader):
     )
 
 
+def update_db_messages(downloader: EmailDownloader):
+    """Update messages in DuckDB"""
+
+    sql = "SELECT ID, raw_json FROM emails"
+    emails = downloader.conn.execute(sql).fetchall()
+    print(f"Updating {len(emails)} messages")
+    for email in emails:
+        email_id = email[0]
+        raw_json = json.loads(email[1])
+        message = clean_message(raw_json.get("body", {}).get("content", ""))
+        downloader.conn.execute(
+            "UPDATE emails SET Message = ? WHERE ID = ?",
+            [
+                message,
+                email_id,
+            ],
+        )
+        downloader.conn.commit()
+
+
 def main(args):
     """Main function"""
 
@@ -118,6 +138,8 @@ def main(args):
             update_attachments(downloader)
         elif args.update_tags:
             update_thread_tags(downloader)
+        elif args.update_db_messages:
+            update_db_messages(downloader)
         elif args.save_xlsx:
             downloader.save_xlsx()
         else:
@@ -135,6 +157,7 @@ def main(args):
 if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description="Reddit scraper")
     arg_parser.add_argument("--update-attachments", action="store_true")
+    arg_parser.add_argument("--update-db-messages", action="store_true")
     arg_parser.add_argument("--update-tags", action="store_true")
     arg_parser.add_argument("--save-xlsx", action="store_true")
     args = arg_parser.parse_args()
