@@ -279,7 +279,7 @@ class GraphAPIClient:
         except requests.exceptions.RequestException as e:
             logger.error(f"Error reading mail folders: {e}")
 
-        logger.info(f"Total mail folders retrieved: {len(all_categories)}")
+        logger.info(f"All categories: ({len(all_categories)}), {all_categories}")
         return all_categories
 
     def add_category(self, message_id: str, category: str) -> bool:

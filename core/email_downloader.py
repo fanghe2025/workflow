@@ -455,8 +455,10 @@ class EmailDownloader:
                     Subject,
                     attachments,
                     Message,
+                    Timestamp,
                 FROM emails
                 JOIN threads ON emails.ThreadID = threads.ThreadID
+                ORDER BY Timestamp DESC
             """
             emails = self.conn.execute(sql).fetchall()
 
@@ -474,6 +476,8 @@ class EmailDownloader:
             "Subject",
             "attachments",
             "Message",
+            "Timestamp",
+            "SentDate",
         ]
         for col_num, header in enumerate(headers, 1):
             cell = ws.cell(row=1, column=col_num)
