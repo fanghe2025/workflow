@@ -15,14 +15,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.constants import NO_LABEL
 from core.email_labeling_model import EmailLabelingModel
 from utils.graph import get_authenticated_api_client
-from utils.common import clean_email_body
+from utils.common import clean_message
 from typing import List, Dict
 
 
-
-def clean_no_label(
-    labels: List[str], all_probs: Dict[str, float]
-) -> List[str]:
+def clean_no_label(labels: List[str], all_probs: Dict[str, float]) -> List[str]:
     """Remove 'No Label' from predicted labels if better alternatives exist"""
     if not labels:
         return labels
@@ -70,7 +67,7 @@ def main():
             tags = email.get("categories", [])
             data = {
                 "Subject": email.get("subject"),
-                "Message": clean_email_body(body.get("content", "")),
+                "Message": clean_message(body.get("content", "")),
                 "Sender": from_info.get("address", ""),
                 "hasAttachments": email.get("hasAttachments", False),
                 "attachments": [],
@@ -81,7 +78,9 @@ def main():
                     data["attachments"].append(attachment.get("name"))
             prediction = model.predict(data)
             predicted_labels = []
-            cleaned = clean_no_label(prediction["labels"], prediction["all_probabilities"])
+            cleaned = clean_no_label(
+                prediction["labels"], prediction["all_probabilities"]
+            )
             for label in cleaned:
                 prob = prediction["all_probabilities"][label]
                 if label == NO_LABEL:

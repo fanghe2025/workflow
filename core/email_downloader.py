@@ -16,7 +16,7 @@ except ImportError:
 
 from core.db import DatabaseConnection
 from core.graph_api_client import GraphAPIClient
-from utils.common import clean_email_body
+from utils.common import clean_message
 
 
 logger = logging.getLogger(__name__)
@@ -306,6 +306,7 @@ class EmailDownloader:
         self,
         email: Dict[str, Any],
         current_folder: Optional[str] = None,
+        check_attachments: bool = False,
     ) -> Tuple[bool, int]:
         """
         Store email in DuckDB
@@ -319,7 +320,7 @@ class EmailDownloader:
         """
         try:
             body = email.get("body", {})
-            body_content = clean_email_body(body.get("content", ""))
+            body_content = clean_message(body.get("content", ""))
             from_info = email.get("from", {}).get("emailAddress", {})
             sender = from_info.get("address", "")
             bcc_recipients = [
@@ -374,7 +375,7 @@ class EmailDownloader:
                 )
                 self.conn.commit()
                 attachment_names: List[str] = []
-                if email.get("hasAttachments", False):
+                if check_attachments and email.get("hasAttachments", False):
                     attachment_names = self.download_and_store_attachments(
                         email_id, download=False
                     )
@@ -432,7 +433,9 @@ class EmailDownloader:
             if i % 100 == 0:
                 logger.info(f"Storing email {i}/{len(emails)}...")
 
-            success = self.store_email(email, current_folder=folder)
+            success = self.store_email(
+                email, current_folder=folder, check_attachments=False
+            )
             if success:
                 results["stored"] += 1
             else:

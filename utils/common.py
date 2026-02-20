@@ -44,9 +44,9 @@ def clean_body(email_body: str) -> str:
     text = re.sub(r"^\s*>+\s?", "", email_body, flags=re.MULTILINE)
 
     # remove external email
-    text = re.sub(
-        r"^.*external email.*$", "", text, flags=re.IGNORECASE | re.MULTILINE
-    ).strip()
+    # text = re.sub(
+    #     r"^.*external email.*$", "", text, flags=re.IGNORECASE | re.MULTILINE
+    # ).strip()
 
     # remove -------------------------
     text = text.replace("-------------------------", "")
@@ -57,12 +57,12 @@ def clean_body(email_body: str) -> str:
     ).strip()
 
     # Remove greeting line (if first line starts with Hi/Hello/etc.)
-    text = re.sub(
-        r"^(hi|hello|hey|dear)\b.*$",
-        "",
-        text.strip(),
-        flags=re.IGNORECASE | re.MULTILINE,
-    )
+    # text = re.sub(
+    #     r"^(hi|hello|hey|dear)\b.*$",
+    #     "",
+    #     text.strip(),
+    #     flags=re.IGNORECASE | re.MULTILINE,
+    # )
 
     # Remove closing phrases and everything after
     text = re.split(
@@ -74,8 +74,12 @@ def clean_body(email_body: str) -> str:
         flags=re.IGNORECASE,
     )[0].strip()
 
+    # remove a links
+    text = re.sub(r"<https://[^>]*>", "", text)
+
     # Remove extra blank lines
-    text = re.sub(r"\n\s*\n", "\n", text).strip()
+    # text = re.sub(r'\n\s*\n', '\n', text).strip()
+    text = text.replace("\n", " ").replace("  ", " ")
 
     return text
 
