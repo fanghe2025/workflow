@@ -74,11 +74,15 @@ class EmailLabelingModel:
             body = email["Message"]
             sender = email["Sender"]
             attachment_names = email["attachments"]
-
+            other_recipients = email["OtherRecipients"]
+            
             # text_parts = [subject, body, sender]
             text_parts = [subject, sender]
+            if other_recipients:
+                text_parts.append(",".join(other_recipients))
             if attachment_names:
                 text_parts.append(",".join(attachment_names))
+            text_parts.append(body)
 
             # Add attachment text if available
             if self.attachment_processor and email.get("attachment_texts"):

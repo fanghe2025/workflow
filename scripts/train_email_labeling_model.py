@@ -41,6 +41,7 @@ def load_emails_from_db(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
             e.Subject,
             e.Message,
             e.Sender,
+            e.OtherRecipients,
             e.attachments,
             t.Tags
         FROM emails e
@@ -52,6 +53,7 @@ def load_emails_from_db(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
             "Subject",
             "Message",
             "Sender",
+            "OtherRecipients",
             "attachments",
             "Tags",
         ]
@@ -78,6 +80,13 @@ def load_emails_from_db(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
             except Exception as e:
                 attachments = []
             email["attachments"] = attachments
+
+            other_recipients = email["OtherRecipients"]
+            try:
+                other_recipients = json.loads(other_recipients)
+            except Exception as e:
+                other_recipients = []
+            email["OtherRecipients"] = other_recipients
 
             emails.append(email)
 

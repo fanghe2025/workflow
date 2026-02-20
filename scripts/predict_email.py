@@ -76,6 +76,16 @@ def main():
                 attachments = api_client.get_email_attachments(email["id"])
                 for attachment in attachments:
                     data["attachments"].append(attachment.get("name"))
+            bcc_recipients = [
+                recipient.get("emailAddress", {}).get("address", "")
+                for recipient in email.get("bccRecipients", [])
+            ]
+            cc_recipients = [
+                recipient.get("emailAddress", {}).get("address", "")
+                for recipient in email.get("ccRecipients", [])
+            ]
+            other_recipients = bcc_recipients + cc_recipients
+            data["OtherRecipients"] = other_recipients
             prediction = model.predict(data)
             predicted_labels = []
             cleaned = clean_no_label(
