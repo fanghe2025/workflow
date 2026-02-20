@@ -41,14 +41,11 @@ def clean_body(email_body: str) -> str:
         return ""
 
     # Remove > quote markers
-    text = re.sub(r'^\s*>+\s?', '', email_body, flags=re.MULTILINE)
+    text = re.sub(r"^\s*>+\s?", "", email_body, flags=re.MULTILINE)
 
     # remove external email
     text = re.sub(
-        r'^.*external email.*$',
-        '',
-        text,
-        flags=re.IGNORECASE | re.MULTILINE
+        r"^.*external email.*$", "", text, flags=re.IGNORECASE | re.MULTILINE
     ).strip()
 
     # remove -------------------------
@@ -56,34 +53,32 @@ def clean_body(email_body: str) -> str:
 
     # remove mailto lines
     text = re.sub(
-        r'^.*mailto:.*$',
-        '',
-        text,
-        flags=re.IGNORECASE | re.MULTILINE
+        r"^.*mailto:.*$", "", text, flags=re.IGNORECASE | re.MULTILINE
     ).strip()
 
     # Remove greeting line (if first line starts with Hi/Hello/etc.)
     text = re.sub(
-        r'^(hi|hello|hey|dear)\b.*$',
-        '',
+        r"^(hi|hello|hey|dear)\b.*$",
+        "",
         text.strip(),
-        flags=re.IGNORECASE | re.MULTILINE
+        flags=re.IGNORECASE | re.MULTILINE,
     )
 
     # Remove closing phrases and everything after
     text = re.split(
-        r'\n\s*(best regards|kind regards|warm regards|regards|'
-        r'thanks and regards|many thanks|thank you|thanks|'
-        r'sincerely|yours sincerely|yours faithfully|'
-        r'best|cheers)\b.*',
+        r"\n\s*(best regards|kind regards|warm regards|regards|"
+        r"thanks and regards|many thanks|thank you|thanks|"
+        r"sincerely|yours sincerely|yours faithfully|"
+        r"best|cheers)\b.*",
         text,
-        flags=re.IGNORECASE
+        flags=re.IGNORECASE,
     )[0].strip()
 
     # Remove extra blank lines
-    text = re.sub(r'\n\s*\n', '\n', text).strip()
+    text = re.sub(r"\n\s*\n", "\n", text).strip()
 
     return text
+
 
 def clean_email_body(email_body: str) -> str:
     if not email_body:

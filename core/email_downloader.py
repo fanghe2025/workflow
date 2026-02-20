@@ -322,6 +322,15 @@ class EmailDownloader:
             body_content = clean_email_body(body.get("content", ""))
             from_info = email.get("from", {}).get("emailAddress", {})
             sender = from_info.get("address", "")
+            bcc_recipients = [
+                recipient.get("emailAddress", {}).get("address", "")
+                for recipient in email.get("bccRecipients", [])
+            ]
+            cc_recipients = [
+                recipient.get("emailAddress", {}).get("address", "")
+                for recipient in email.get("ccRecipients", [])
+            ]
+            other_recipients = bcc_recipients + cc_recipients
             received_at = email.get("receivedDateTime")
             is_read = email.get("isRead", False)
             raw_json = json.dumps(email)
@@ -343,9 +352,9 @@ class EmailDownloader:
             else:
                 insert_sql = """
                 INSERT INTO emails (
-                    ID, ThreadID, Timestamp, Sender, Subject, Message, IsRead,
-                    has_attachments, attachments, raw_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ID, ThreadID, Timestamp, Sender, Subject, Message, OtherRecipients,
+                    IsRead, has_attachments, attachments, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """
                 self.conn.execute(
                     insert_sql,
@@ -356,6 +365,7 @@ class EmailDownloader:
                         sender,
                         email.get("subject"),
                         body_content,
+                        json.dumps(other_recipients) if other_recipients else "[]",
                         is_read,
                         email.get("hasAttachments", False),
                         "[]",

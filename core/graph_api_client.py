@@ -171,7 +171,7 @@ class GraphAPIClient:
                 params = {
                     "$top": batch_size,
                     # Superset of fields used previously in both readers
-                    "$select": "id,subject,from,body,conversationId,receivedDateTime,hasAttachments,categories,isRead",
+                    "$select": "id,subject,from,body,bccRecipients,ccRecipients,conversationId,receivedDateTime,hasAttachments,categories,isRead",
                     "$orderby": "receivedDateTime desc",
                 }
 

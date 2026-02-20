@@ -78,6 +78,7 @@ class DatabaseConnection:
             Sender VARCHAR,
             Subject VARCHAR,
             Message TEXT,
+            OtherRecipients VARCHAR,
             IsRead BOOLEAN,
             has_attachments BOOLEAN,
             attachments TEXT,

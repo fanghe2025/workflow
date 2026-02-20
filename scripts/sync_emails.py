@@ -148,7 +148,7 @@ def main(args):
                     folder=folder,
                     filter_query=filter_query,
                     batch_size=batch_size,
-                    limit=500,
+                    # limit=500,
                 )
     finally:
         downloader.close()
