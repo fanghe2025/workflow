@@ -67,6 +67,8 @@ def update_thread_tags(downloader: EmailDownloader):
                 if tag == "Broadcast":
                     updated_tags.append("Broadcast-Linear")
                     changed = True
+                elif tag == "For PDX":
+                    changed = True
                 else:
                     updated_tags.append(tag)
 
@@ -89,7 +91,7 @@ def update_thread_tags(downloader: EmailDownloader):
 
     downloader.conn.commit()
     print(
-        f"Updated {updated_count} threads (replaced 'Broadcast' with 'Broadcast-Linear')"
+        f"Updated {updated_count} threads tags"
     )
 
 

@@ -13,7 +13,8 @@
   },
   "training": {
     "test_size": 0.2,
-    "random_state": 42
+    "random_state": 42,
+    "max_samples_per_tag": 0
   },
   "prediction": {
     "threshold": 0.1

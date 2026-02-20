@@ -1,6 +1,7 @@
 import ast
 import json
 import os
+import random
 import sys
 
 from pathlib import Path
@@ -87,6 +88,49 @@ def load_emails_from_db(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
     return []
 
 
+def limit_samples_per_tag(
+    emails: List[Dict[str, Any]], max_per_tag: int, random_state: Optional[int] = 42
+) -> List[Dict[str, Any]]:
+    """
+    Limit training data to at most max_per_tag emails per tag.
+    Emails can have multiple tags; each email is included if it's sampled for any tag.
+
+    Args:
+        emails: List of labeled email dicts (must have "Tags" key)
+        max_per_tag: Maximum number of emails to use per tag
+        random_state: Random seed for reproducible sampling
+
+    Returns:
+        Subset of emails
+    """
+    if max_per_tag is None or max_per_tag <= 0:
+        return emails
+
+    rng = random.Random(random_state)
+
+    # Build tag -> emails mapping (by index to preserve uniqueness)
+    tag_to_indices: Dict[str, set] = {}
+    for i, email in enumerate(emails):
+        tags = email.get("Tags", [])
+        if not tags:
+            continue
+        for tag in tags:
+            if tag not in tag_to_indices:
+                tag_to_indices[tag] = set()
+            tag_to_indices[tag].add(i)
+
+    # For each tag, sample at most max_per_tag email indices
+    selected_indices = set()
+    for tag, indices in tag_to_indices.items():
+        indices_list = list(indices)
+        if len(indices_list) <= max_per_tag:
+            selected_indices.update(indices_list)
+        else:
+            selected_indices.update(rng.sample(indices_list, max_per_tag))
+
+    return [emails[i] for i in sorted(selected_indices)]
+
+
 def main():
     """Main training function"""
     # Load configuration
@@ -110,6 +154,17 @@ def main():
     # Load labeled emails (prefer DuckDB, fallback to JSON)
     print("Loading labeled emails...")
     emails = load_emails_from_db(db_path=db_path)
+
+    # Limit to max_samples_per_tag if configured
+    training_cfg = config.get("training", {})
+    max_per_tag = training_cfg.get("max_samples_per_tag")
+    if max_per_tag is not None and max_per_tag > 0:
+        random_state = training_cfg.get("random_state", 42)
+        before = len(emails)
+        emails = limit_samples_per_tag(emails, max_per_tag, random_state)
+        print(
+            f"Limited to {max_per_tag} samples per tag: {before} -> {len(emails)} emails"
+        )
 
     if not emails:
         print("No emails found.")
