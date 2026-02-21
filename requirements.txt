@@ -4,6 +4,7 @@ numpy==1.24.3
 pandas==2.0.3
 joblib==1.3.2
 scipy==1.11.4
+xgboost>=2.0.0
 
 # Text Processing
 nltk==3.8.1
@@ -26,6 +27,7 @@ email-validator==2.1.0
 # Utilities
 python-dotenv==1.0.0
 requests==2.31.0
+openai==1.99.5
 
 # Microsoft Graph API
 msal==1.28.0

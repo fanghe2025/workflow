@@ -5,6 +5,7 @@ This script trains a machine learning model to classify emails based on
 their content, subject, sender, attachments, and other features.
 """
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -13,6 +14,7 @@ import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.multioutput import MultiOutputClassifier
 from sklearn.metrics import classification_report, accuracy_score, hamming_loss
 from sklearn.preprocessing import MultiLabelBinarizer
@@ -23,6 +25,45 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.attachment_processor import AttachmentProcessor
 from core.constants import NO_LABEL
+
+
+def _create_base_classifier(model_config: Dict[str, Any]):
+    """Create base classifier from config. Supports random_forest, xgboost, logistic_regression."""
+    model_type = model_config.get("type", "random_forest")
+    random_state = model_config.get("random_state", 42)
+
+    if model_type == "random_forest":
+        return RandomForestClassifier(
+            n_estimators=model_config.get("n_estimators", 100),
+            max_depth=model_config.get("max_depth", 20),
+            random_state=random_state,
+            n_jobs=-1,
+        )
+    if model_type == "logistic_regression":
+        return LogisticRegression(
+            max_iter=model_config.get("max_iter", 1000),
+            C=model_config.get("C", 1.0),
+            random_state=random_state,
+            n_jobs=-1,
+            solver=model_config.get("solver", "lbfgs"),
+        )
+    if model_type == "xgboost":
+        try:
+            import xgboost as xgb
+        except ImportError as e:
+            raise ImportError(
+                "xgboost package required for xgboost model. Run: pip install xgboost"
+            ) from e
+        return xgb.XGBClassifier(
+            n_estimators=model_config.get("n_estimators", 100),
+            max_depth=model_config.get("max_depth", 6),
+            learning_rate=model_config.get("learning_rate", 0.1),
+            random_state=random_state,
+            n_jobs=-1,
+        )
+    raise ValueError(
+        f"Unknown model type: {model_type}. Use random_forest, logistic_regression, or xgboost."
+    )
 
 
 class EmailLabelingModel:
@@ -48,13 +89,11 @@ class EmailLabelingModel:
         self.prediction_threshold = prediction_config.get("threshold", 0.1)
 
         model_config = self.config.get("model", {})
-        base_classifier = RandomForestClassifier(
-            n_estimators=model_config.get("n_estimators", 100),
-            max_depth=model_config.get("max_depth", 20),
-            random_state=model_config.get("random_state", 42),
-            n_jobs=-1,
-        )
+        model_type = model_config.get("type", "random_forest")
+        base_classifier = _create_base_classifier(model_config)
         self.model = MultiOutputClassifier(base_classifier, n_jobs=-1)
+        logger = logging.getLogger(__name__)
+        logger.info("Using model type: %s", model_type)
         self.label_binarizer = MultiLabelBinarizer()
         self.label_list = []  # Store list of all unique labels
         self.is_trained = False
