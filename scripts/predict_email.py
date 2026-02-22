@@ -16,6 +16,7 @@ from core.constants import NO_LABEL
 from core.email_labeling_model import EmailLabelingModel
 from utils.graph import get_authenticated_api_client
 from utils.common import clean_message
+from utils.sanitize import hash_email, hash_emails
 from typing import List, Dict
 
 
@@ -65,10 +66,26 @@ def main():
             body = email.get("body", {})
             from_info = email.get("from", {}).get("emailAddress", {})
             tags = email.get("categories", [])
+            bcc_raw = [
+                r.get("emailAddress", {}).get("address", "")
+                for r in email.get("bccRecipients", [])
+            ]
+            cc_raw = [
+                r.get("emailAddress", {}).get("address", "")
+                for r in email.get("ccRecipients", [])
+            ]
+            to_raw = [
+                r.get("emailAddress", {}).get("address", "")
+                for r in email.get("toRecipients", [])
+            ]
+            all_recipients = to_raw + cc_raw + bcc_raw
             data = {
                 "Subject": email.get("subject"),
-                "Message": clean_message(body.get("content", "")),
-                "Sender": from_info.get("address", ""),
+                "Message": clean_message(
+                    body.get("content", ""),
+                    recipient_emails=all_recipients,
+                ),
+                "Sender": hash_email(from_info.get("address", "") or ""),
                 "hasAttachments": email.get("hasAttachments", False),
                 "attachments": [],
             }
@@ -76,16 +93,7 @@ def main():
                 attachments = api_client.get_email_attachments(email["id"])
                 for attachment in attachments:
                     data["attachments"].append(attachment.get("name"))
-            bcc_recipients = [
-                recipient.get("emailAddress", {}).get("address", "")
-                for recipient in email.get("bccRecipients", [])
-            ]
-            cc_recipients = [
-                recipient.get("emailAddress", {}).get("address", "")
-                for recipient in email.get("ccRecipients", [])
-            ]
-            other_recipients = bcc_recipients + cc_recipients
-            data["OtherRecipients"] = other_recipients
+            data["OtherRecipients"] = hash_emails(all_recipients)
             prediction = model.predict(data)
             predicted_labels = []
             cleaned = clean_no_label(

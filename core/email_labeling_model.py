@@ -14,7 +14,6 @@ import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
 from sklearn.multioutput import MultiOutputClassifier
 from sklearn.metrics import classification_report, accuracy_score, hamming_loss
 from sklearn.preprocessing import MultiLabelBinarizer
@@ -28,7 +27,7 @@ from core.constants import NO_LABEL
 
 
 def _create_base_classifier(model_config: Dict[str, Any]):
-    """Create base classifier from config. Supports random_forest, xgboost, logistic_regression."""
+    """Create base classifier from config. Supports random_forest."""
     model_type = model_config.get("type", "random_forest")
     random_state = model_config.get("random_state", 42)
 
@@ -39,31 +38,7 @@ def _create_base_classifier(model_config: Dict[str, Any]):
             random_state=random_state,
             n_jobs=-1,
         )
-    if model_type == "logistic_regression":
-        return LogisticRegression(
-            max_iter=model_config.get("max_iter", 1000),
-            C=model_config.get("C", 1.0),
-            random_state=random_state,
-            n_jobs=-1,
-            solver=model_config.get("solver", "lbfgs"),
-        )
-    if model_type == "xgboost":
-        try:
-            import xgboost as xgb
-        except ImportError as e:
-            raise ImportError(
-                "xgboost package required for xgboost model. Run: pip install xgboost"
-            ) from e
-        return xgb.XGBClassifier(
-            n_estimators=model_config.get("n_estimators", 100),
-            max_depth=model_config.get("max_depth", 6),
-            learning_rate=model_config.get("learning_rate", 0.1),
-            random_state=random_state,
-            n_jobs=-1,
-        )
-    raise ValueError(
-        f"Unknown model type: {model_type}. Use random_forest, logistic_regression, or xgboost."
-    )
+    raise ValueError(f"Unknown model type: {model_type}. Use random_forest.")
 
 
 class EmailLabelingModel:
@@ -114,7 +89,7 @@ class EmailLabelingModel:
             sender = email["Sender"]
             attachment_names = email["attachments"]
             other_recipients = email["OtherRecipients"]
-            
+
             # text_parts = [subject, body, sender]
             text_parts = [subject, sender]
             if other_recipients:

@@ -9,6 +9,8 @@ import json
 
 from mailparser_reply import EmailReplyParser
 
+from utils.sanitize import replace_emails_in_text
+
 
 def load_config(config_path: str = "config/graph_config.json") -> Dict[str, Any]:
     """Load Graph API configuration from JSON file"""
@@ -26,7 +28,7 @@ def load_config(config_path: str = "config/graph_config.json") -> Dict[str, Any]
 
 
 def clean_message(message: str) -> str:
-    """Clean a message by removing the closing and replies"""
+    """Clean a message by removing the closing and replies; replace all email addresses with MD5 hashes."""
     mail_message = EmailReplyParser().read(text=message)
     message = []
     for reply in mail_message.replies:
@@ -80,6 +82,9 @@ def clean_body(email_body: str) -> str:
     # Remove extra blank lines
     # text = re.sub(r'\n\s*\n', '\n', text).strip()
     text = text.replace("\n", " ").replace("  ", " ")
+
+    # Hide credentials: replace all email addresses with MD5 hashes
+    text = replace_emails_in_text(text)
 
     return text
 
