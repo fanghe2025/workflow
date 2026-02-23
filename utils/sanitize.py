@@ -2,6 +2,7 @@
 Sanitization utilities for hiding credentials and PII.
 
 - Hashes email addresses with MD5 (each address maps to a stable hash)
+- Hashes phone numbers with MD5 (digits-normalized)
 - Redacts credential fields when needed for logging
 """
 
@@ -13,6 +14,11 @@ from typing import Dict, Any, List, Optional
 _EMAIL_PATTERN = re.compile(
     r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
     re.IGNORECASE,
+)
+
+# Regex to match phone numbers (international and common formats)
+_PHONE_PATTERN = re.compile(
+    r"\+?\d{1,4}[-.\s]?\(?\d{2,4}\)?[-.\s]?\d{2,4}[-.\s]?\d{2,4}(?:[-.\s]?\d{2,4})?"
 )
 
 # Config keys that contain secrets (should not be logged or exposed)
@@ -45,95 +51,47 @@ def hash_emails(emails: List[str]) -> List[str]:
     return [hash_email(e) for e in emails if e]
 
 
-def replace_emails_in_text(
-    text: str, additional_emails: Optional[List[str]] = None
-) -> str:
+def _normalize_phone(phone: str) -> str:
+    """Extract digits only from phone string."""
+    return "".join(c for c in phone if c.isdigit())
+
+
+def replace_pii_in_text(text: str) -> str:
     """
-    Replace all email addresses in text with their MD5 hashes.
+    Replace all email addresses and phone numbers in text with their MD5 hashes.
 
     Args:
-        text: Body or any string that may contain email addresses
-        additional_emails: Extra addresses to replace (e.g. from recipient list)
+        text: Body or any string that may contain emails or phones
 
     Returns:
-        Text with each email replaced by its 32-char MD5 hex hash
+        Text with each email and phone replaced by its 32-char MD5 hex hash
     """
     if not text:
         return ""
 
-    seen: Dict[str, str] = {}
+    email_seen: Dict[str, str] = {}
 
-    def replacer(match: re.Match) -> str:
+    def email_replacer(match: re.Match) -> str:
         addr = match.group(0)
         key = addr.lower().strip()
-        if key not in seen:
-            seen[key] = hash_email(addr)
-        return seen[key]
+        if key not in email_seen:
+            email_seen[key] = hash_email(addr)
+        return email_seen[key]
 
-    result = _EMAIL_PATTERN.sub(replacer, text)
+    result = _EMAIL_PATTERN.sub(email_replacer, text)
 
-    if additional_emails:
-        for addr in additional_emails:
-            if not addr or not isinstance(addr, str):
-                continue
-            key = addr.lower().strip()
-            if key and key not in seen:
-                seen[key] = hash_email(addr)
-            h = seen.get(key, hash_email(addr))
-            # Replace this specific address in result (handle case variations)
-            result = re.sub(
-                re.escape(addr),
-                h,
-                result,
-                flags=re.IGNORECASE,
-            )
+    phone_seen: Dict[str, str] = {}
 
-    return result
+    def phone_replacer(match: re.Match) -> str:
+        raw = match.group(0)
+        normalized = _normalize_phone(raw)
+        if len(normalized) < 10 or len(normalized) > 15:
+            return raw
+        if normalized not in phone_seen:
+            phone_seen[normalized] = hashlib.md5(normalized.encode("utf-8")).hexdigest()
+        return phone_seen[normalized]
 
-
-def sanitize_email_for_storage(email: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Sanitize an email dict for storage: hash sender, recipients, and emails in body.
-
-    Modifies a copy of the dict; does not mutate the original.
-    """
-    import copy
-
-    email = copy.deepcopy(email)
-
-    # Collect all email addresses we need to hash
-    all_emails: List[str] = []
-
-    from_info = email.get("from", {}).get("emailAddress", {})
-    sender = from_info.get("address", "")
-    if sender:
-        all_emails.append(sender)
-
-    for key in ("toRecipients", "ccRecipients", "bccRecipients"):
-        for r in email.get(key, []):
-            addr = r.get("emailAddress", {}).get("address", "")
-            if addr:
-                all_emails.append(addr)
-
-    # Hash body content
-    body = email.get("body", {})
-    if isinstance(body, dict):
-        content = body.get("content", "")
-        if content:
-            body["content"] = replace_emails_in_text(content, all_emails)
-
-    # Hash addresses in recipient structures
-    from_info = email.get("from", {}).get("emailAddress", {})
-    if from_info.get("address"):
-        from_info["address"] = hash_email(from_info["address"])
-
-    for key in ("toRecipients", "ccRecipients", "bccRecipients"):
-        for r in email.get(key, []):
-            addr_obj = r.get("emailAddress", {})
-            if addr_obj.get("address"):
-                addr_obj["address"] = hash_email(addr_obj["address"])
-
-    return email
+    return _PHONE_PATTERN.sub(phone_replacer, result)
 
 
 def redact_credentials(config: Dict[str, Any]) -> Dict[str, Any]:
