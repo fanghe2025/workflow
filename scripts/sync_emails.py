@@ -90,9 +90,7 @@ def update_thread_tags(downloader: EmailDownloader):
             continue
 
     downloader.conn.commit()
-    print(
-        f"Updated {updated_count} threads tags"
-    )
+    print(f"Updated {updated_count} threads tags")
 
 
 def update_db_messages(downloader: EmailDownloader):

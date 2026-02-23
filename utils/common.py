@@ -9,7 +9,7 @@ import json
 
 from mailparser_reply import EmailReplyParser
 
-from utils.sanitize import replace_emails_in_text
+from utils.sanitize import replace_pii_in_text
 
 
 def load_config(config_path: str = "config/graph_config.json") -> Dict[str, Any]:
@@ -28,7 +28,7 @@ def load_config(config_path: str = "config/graph_config.json") -> Dict[str, Any]
 
 
 def clean_message(message: str) -> str:
-    """Clean a message by removing the closing and replies; replace all email addresses with MD5 hashes."""
+    """Clean a message by removing the closing and replies; replace emails and phone numbers with MD5 hashes."""
     mail_message = EmailReplyParser().read(text=message)
     message = []
     for reply in mail_message.replies:
@@ -71,6 +71,7 @@ def clean_body(email_body: str) -> str:
         r"\n\s*(best regards|kind regards|warm regards|regards|"
         r"thanks and regards|many thanks|thank you|thanks|"
         r"sincerely|yours sincerely|yours faithfully|"
+        r"[premeire digital services]|"
         r"best|cheers)\b.*",
         text,
         flags=re.IGNORECASE,
@@ -80,11 +81,11 @@ def clean_body(email_body: str) -> str:
     text = re.sub(r"<https://[^>]*>", "", text)
 
     # Remove extra blank lines
-    # text = re.sub(r'\n\s*\n', '\n', text).strip()
-    text = text.replace("\n", " ").replace("  ", " ")
+    text = re.sub(r"\n\s*\n", "\n", text).strip()
+    # text = text.replace("\n", " ").replace("  ", " ")
 
-    # Hide credentials: replace all email addresses with MD5 hashes
-    text = replace_emails_in_text(text)
+    # Hide PII: replace email addresses and phone numbers with MD5 hashes
+    text = replace_pii_in_text(text)
 
     return text
 
