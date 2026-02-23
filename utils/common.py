@@ -54,9 +54,9 @@ def clean_body(email_body: str) -> str:
     text = text.replace("-------------------------", "")
 
     # remove mailto lines
-    text = re.sub(
-        r"^.*mailto:.*$", "", text, flags=re.IGNORECASE | re.MULTILINE
-    ).strip()
+    # text = re.sub(
+    #     r"^.*mailto:.*$", "", text, flags=re.IGNORECASE | re.MULTILINE
+    # ).strip()
 
     # Remove greeting line (if first line starts with Hi/Hello/etc.)
     # text = re.sub(
@@ -67,22 +67,23 @@ def clean_body(email_body: str) -> str:
     # )
 
     # Remove closing phrases and everything after
-    text = re.split(
-        r"\n\s*(best regards|kind regards|warm regards|regards|"
+    pattern = re.compile(
+        r"^\s*(best regards|kind regards|warm regards|with regards|regards|"
         r"thanks and regards|many thanks|thank you|thanks|"
         r"sincerely|yours sincerely|yours faithfully|"
-        r"[premeire digital services]|"
-        r"best|cheers)\b.*",
-        text,
-        flags=re.IGNORECASE,
-    )[0].strip()
+        r"best|cheers|\[premeire digital services\])[\s!,/]*$",
+        re.IGNORECASE | re.MULTILINE
+    )
+    match = pattern.search(text)
+    if match:
+        text = text[:match.start()].strip()
 
     # remove a links
     text = re.sub(r"<https://[^>]*>", "", text)
 
     # Remove extra blank lines
-    text = re.sub(r"\n\s*\n", "\n", text).strip()
-    # text = text.replace("\n", " ").replace("  ", " ")
+    # text = re.sub(r"\n\s*\n", "\n", text).strip()
+    text = text.replace("\n", " ").replace("  ", " ")
 
     # Hide PII: replace email addresses and phone numbers with MD5 hashes
     text = replace_pii_in_text(text)

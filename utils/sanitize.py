@@ -3,6 +3,7 @@ Sanitization utilities for hiding credentials and PII.
 
 - Hashes email addresses with MD5 (each address maps to a stable hash)
 - Hashes phone numbers with MD5 (digits-normalized)
+- Hashes street/postal addresses with MD5
 - Redacts credential fields when needed for logging
 """
 
@@ -19,6 +20,16 @@ _EMAIL_PATTERN = re.compile(
 # Regex to match phone numbers (international and common formats)
 _PHONE_PATTERN = re.compile(
     r"\+?\d{1,4}[-.\s]?\(?\d{2,4}\)?[-.\s]?\d{2,4}[-.\s]?\d{2,4}(?:[-.\s]?\d{2,4})?"
+)
+
+# Regex to match street/postal address patterns
+_ADDRESS_PATTERN = re.compile(
+    r"\d{1,6}\s+[\w\s\.\-]{2,50}"
+    r"(?:Street|St\.?|Avenue|Ave\.?|Boulevard|Blvd\.?|Road|Rd\.?|Drive|Dr\.?|"
+    r"Lane|Ln\.?|Court|Ct\.?|Place|Pl\.?|Way|Circle|Terrace|Suite|Ste\.?|"
+    r"Apt\.?|Unit|Building|Bldg\.?|Floor|Fl\.?|Room|Rm\.?|"
+    r"Highway|Hwy\.?|Parkway|Pkwy\.?|Trail|Trl\.?)\b",
+    re.IGNORECASE,
 )
 
 # Config keys that contain secrets (should not be logged or exposed)
@@ -56,15 +67,20 @@ def _normalize_phone(phone: str) -> str:
     return "".join(c for c in phone if c.isdigit())
 
 
+def _normalize_address(addr: str) -> str:
+    """Normalize address for hashing: lowercase, collapse whitespace."""
+    return " ".join(addr.lower().split())
+
+
 def replace_pii_in_text(text: str) -> str:
     """
-    Replace all email addresses and phone numbers in text with their MD5 hashes.
+    Replace all email addresses, phone numbers, and addresses in text with MD5 hashes.
 
     Args:
-        text: Body or any string that may contain emails or phones
+        text: Body or any string that may contain PII
 
     Returns:
-        Text with each email and phone replaced by its 32-char MD5 hex hash
+        Text with each email, phone, and address replaced by its 32-char MD5 hex hash
     """
     if not text:
         return ""
@@ -91,7 +107,20 @@ def replace_pii_in_text(text: str) -> str:
             phone_seen[normalized] = hashlib.md5(normalized.encode("utf-8")).hexdigest()
         return phone_seen[normalized]
 
-    return _PHONE_PATTERN.sub(phone_replacer, result)
+    result = _PHONE_PATTERN.sub(phone_replacer, result)
+
+    address_seen: Dict[str, str] = {}
+
+    def address_replacer(match: re.Match) -> str:
+        raw = match.group(0).strip()
+        if len(raw) < 10:
+            return raw
+        normalized = _normalize_address(raw)
+        if normalized not in address_seen:
+            address_seen[normalized] = hashlib.md5(normalized.encode("utf-8")).hexdigest()
+        return address_seen[normalized]
+
+    return _ADDRESS_PATTERN.sub(address_replacer, result)
 
 
 def redact_credentials(config: Dict[str, Any]) -> Dict[str, Any]:
