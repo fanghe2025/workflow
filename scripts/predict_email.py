@@ -14,8 +14,6 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from utils.db import get_all_tags
-
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.constants import NO_LABEL
@@ -23,12 +21,13 @@ from core.email_labeling_model import EmailLabelingModel
 from core.llm_tag_model import LLMTagModel
 from utils.graph import get_authenticated_api_client
 from utils.common import clean_message
-from utils.sanitize import hash_email, hash_emails
+from utils.db import get_all_tags
 from typing import List, Dict
 
 load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
 fine_tune_job_id = os.getenv("FINE_TUNE_JOB_ID")
+fine_tune_model = os.getenv("FINE_TUNED_MODEL")
 
 
 def clean_no_label(labels: List[str], all_probs: Dict[str, float]) -> List[str]:
@@ -63,6 +62,7 @@ def read_emails():
     # categories = api_client.get_category_list()
     # print(categories)
     emails = api_client.read_emails()
+    cleaned_emails = []
     for email in emails:
         bcc_recipients = [
             recipient.get("emailAddress", {}).get("address", "")
@@ -84,6 +84,9 @@ def read_emails():
             attachments = api_client.get_email_attachments(email["id"])
             for attachment in attachments:
                 data["attachments"].append(attachment.get("name"))
+        cleaned_emails.append(data)
+
+    return cleaned_emails
 
 
 def predict_with_random_forest(emails):
@@ -114,10 +117,13 @@ def predict_with_random_forest(emails):
 
 
 def predict_with_fine_tune(emails):
-    llm = LLMTagModel(api_key)
+    llm = LLMTagModel(api_key, model=fine_tune_model)
     llm._all_tags = get_all_tags()
+    print(f"{'Original Tags':<50} | {'Predicted Tags'}")
+    print("-" * 100)
     for email in emails:
-        llm.predict(email)
+        predicted_tags = llm.predict(email)
+        print(f"{str(email['Tags']):<50} | {str(predicted_tags):<50}")
 
 
 def main(args):

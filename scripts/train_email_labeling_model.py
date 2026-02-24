@@ -21,14 +21,18 @@ from utils.db import load_emails
 load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
 db_path = os.getenv("DUCKDB_PATH", "data/emails.duckdb")
+max_samples_per_tag = os.getenv("MAX_SAMPLES_PER_TAG")
 
 
 def limit_samples_per_tag(
-    emails: List[Dict[str, Any]], max_per_tag: int, random_state: Optional[int] = 42
+    emails: List[Dict[str, Any]],
+    max_per_tag: int,
+    random_state: Optional[int] = 42,
 ) -> List[Dict[str, Any]]:
     """
     Limit training data to at most max_per_tag emails per tag.
     Emails can have multiple tags; each email is included if it's sampled for any tag.
+    Emails without tags are treated as a separate label group.
 
     Args:
         emails: List of labeled email dicts (must have "Tags" key)
@@ -43,18 +47,21 @@ def limit_samples_per_tag(
 
     rng = random.Random(random_state)
 
-    # Build tag -> emails mapping (by index to preserve uniqueness)
+    # Build tag -> email indices mapping
     tag_to_indices: Dict[str, set] = {}
+
     for i, email in enumerate(emails):
         tags = email.get("Tags", [])
+
         if not tags:
-            continue
+            tags = ["__NO_TAG__"]  # Treat no-tag emails as their own class
+
         for tag in tags:
             if tag not in tag_to_indices:
                 tag_to_indices[tag] = set()
             tag_to_indices[tag].add(i)
 
-    # For each tag, sample at most max_per_tag email indices
+    # Sample per tag
     selected_indices = set()
     for tag, indices in tag_to_indices.items():
         indices_list = list(indices)
@@ -117,6 +124,12 @@ def train_with_fine_tune(upload=False, start_job=False):
         return 1
 
     emails = load_emails(db_path)
+    if max_samples_per_tag:
+        before = len(emails)
+        emails = limit_samples_per_tag(emails, int(max_samples_per_tag))
+        print(
+            f"Limited to {max_samples_per_tag} samples per tag: {before} -> {len(emails)} emails"
+        )
 
     llm = LLMTagModel(api_key)
     out_path = llm._write_train_data(emails, path="data/finetune_data.jsonl")

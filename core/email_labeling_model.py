@@ -23,7 +23,6 @@ import joblib
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.attachment_processor import AttachmentProcessor
-from core.constants import NO_LABEL
 
 
 def _create_base_classifier(model_config: Dict[str, Any]):

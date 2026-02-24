@@ -193,7 +193,6 @@ class LLMTagModel:
                                 "type": "array",
                                 "items": {"type": "string", "enum": self._all_tags},
                                 "maxItems": 4,
-                                "uniqueItems": True,
                             }
                         },
                         "required": ["tags"],
@@ -206,7 +205,7 @@ class LLMTagModel:
 
         # Parse and return the tags from the model's output
         data = json.loads(response.output_text)
-        return data["tags"][:4]  # Limiting to 4 tags max
+        return data["tags"]
 
     def predict_batch(self, emails: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Predict tags for multiple emails."""
