@@ -9,6 +9,6 @@ This package exposes:
 
 from .db import DatabaseConnection
 from .email_downloader import EmailDownloader
-from .llm_model import LLMTagModel, load_known_tags
+from .llm_tag_model import LLMTagModel
 
-__all__ = ["DatabaseConnection", "EmailDownloader", "LLMTagModel", "load_known_tags"]
+__all__ = ["DatabaseConnection", "EmailDownloader", "LLMTagModel"]

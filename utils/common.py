@@ -9,7 +9,7 @@ import json
 
 from mailparser_reply import EmailReplyParser
 
-from utils.sanitize import replace_pii_in_text
+from utils.sanitize import hash_email, hash_emails, replace_pii_in_text
 
 
 def load_config(config_path: str = "config/graph_config.json") -> Dict[str, Any]:
@@ -72,11 +72,11 @@ def clean_body(email_body: str) -> str:
         r"thanks and regards|many thanks|thank you|thanks|"
         r"sincerely|yours sincerely|yours faithfully|"
         r"best|cheers|\[premeire digital services\])[\s!,/]*$",
-        re.IGNORECASE | re.MULTILINE
+        re.IGNORECASE | re.MULTILINE,
     )
     match = pattern.search(text)
     if match:
-        text = text[:match.start()].strip()
+        text = text[: match.start()].strip()
 
     # remove a links
     text = re.sub(r"<https://[^>]*>", "", text)

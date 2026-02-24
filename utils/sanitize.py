@@ -117,7 +117,9 @@ def replace_pii_in_text(text: str) -> str:
             return raw
         normalized = _normalize_address(raw)
         if normalized not in address_seen:
-            address_seen[normalized] = hashlib.md5(normalized.encode("utf-8")).hexdigest()
+            address_seen[normalized] = hashlib.md5(
+                normalized.encode("utf-8")
+            ).hexdigest()
         return address_seen[normalized]
 
     return _ADDRESS_PATTERN.sub(address_replacer, result)
