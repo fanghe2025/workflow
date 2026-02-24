@@ -21,8 +21,6 @@ from utils.db import load_emails
 load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
 db_path = os.getenv("DUCKDB_PATH", "data/emails.duckdb")
-fine_tune_file_id = os.getenv("FINE_TUNE_FILE_ID")
-fine_tune_job_id = os.getenv("FINE_TUNE_JOB_ID")
 
 
 def limit_samples_per_tag(
@@ -140,7 +138,7 @@ def main(args):
     if args.random_forest:
         train_with_random_forest()
     elif args.fine_tune:
-        train_with_fine_tune()
+        train_with_fine_tune(True, True)
 
 
 if __name__ == "__main__":

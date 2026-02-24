@@ -7,17 +7,28 @@ This script uses Microsoft Graph API to:
 3. Add tags/categories to emails based on predictions
 """
 
+import argparse
+import os
 import sys
 from pathlib import Path
+
+from dotenv import load_dotenv
+
+from utils.db import get_all_tags
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.constants import NO_LABEL
 from core.email_labeling_model import EmailLabelingModel
+from core.llm_tag_model import LLMTagModel
 from utils.graph import get_authenticated_api_client
 from utils.common import clean_message
 from utils.sanitize import hash_email, hash_emails
 from typing import List, Dict
+
+load_dotenv()
+api_key = os.getenv("OPENAI_API_KEY")
+fine_tune_job_id = os.getenv("FINE_TUNE_JOB_ID")
 
 
 def clean_no_label(labels: List[str], all_probs: Dict[str, float]) -> List[str]:
@@ -43,9 +54,7 @@ def clean_no_label(labels: List[str], all_probs: Dict[str, float]) -> List[str]:
     return cleaned
 
 
-def main():
-    """Main predict function"""
-
+def read_emails():
     api_client = get_authenticated_api_client()
     if not api_client:
         print("Failed to authenticate API client")
@@ -54,7 +63,30 @@ def main():
     # categories = api_client.get_category_list()
     # print(categories)
     emails = api_client.read_emails()
+    for email in emails:
+        bcc_recipients = [
+            recipient.get("emailAddress", {}).get("address", "")
+            for recipient in email.get("bccRecipients", [])
+        ]
+        cc_recipients = [
+            recipient.get("emailAddress", {}).get("address", "")
+            for recipient in email.get("ccRecipients", [])
+        ]
+        data = {
+            "Subject": email.get("subject"),
+            "Message": clean_message(email.get("body", {}).get("content", "")),
+            "Sender": email.get("from", {}).get("emailAddress", {}).get("address", ""),
+            "OtherRecipients": bcc_recipients + cc_recipients,
+            "attachments": [],
+            "Tags": email.get("categories", []),
+        }
+        if email.get("hasAttachments", False):
+            attachments = api_client.get_email_attachments(email["id"])
+            for attachment in attachments:
+                data["attachments"].append(attachment.get("name"))
 
+
+def predict_with_random_forest(emails):
     # Initialize and predict model
     model = EmailLabelingModel(model_path="models/email_classifier.pkl")
     model.load()
@@ -63,38 +95,7 @@ def main():
         print(f"{'Original Tags':<50} | {'Predicted Tags'}")
         print("-" * 100)
         for email in emails:
-            body = email.get("body", {})
-            from_info = email.get("from", {}).get("emailAddress", {})
-            tags = email.get("categories", [])
-            bcc_raw = [
-                r.get("emailAddress", {}).get("address", "")
-                for r in email.get("bccRecipients", [])
-            ]
-            cc_raw = [
-                r.get("emailAddress", {}).get("address", "")
-                for r in email.get("ccRecipients", [])
-            ]
-            to_raw = [
-                r.get("emailAddress", {}).get("address", "")
-                for r in email.get("toRecipients", [])
-            ]
-            all_recipients = to_raw + cc_raw + bcc_raw
-            data = {
-                "Subject": email.get("subject"),
-                "Message": clean_message(
-                    body.get("content", ""),
-                    recipient_emails=all_recipients,
-                ),
-                "Sender": hash_email(from_info.get("address", "") or ""),
-                "hasAttachments": email.get("hasAttachments", False),
-                "attachments": [],
-            }
-            if email.get("hasAttachments", False):
-                attachments = api_client.get_email_attachments(email["id"])
-                for attachment in attachments:
-                    data["attachments"].append(attachment.get("name"))
-            data["OtherRecipients"] = hash_emails(all_recipients)
-            prediction = model.predict(data)
+            prediction = model.predict(email)
             predicted_labels = []
             cleaned = clean_no_label(
                 prediction["labels"], prediction["all_probabilities"]
@@ -105,12 +106,33 @@ def main():
                     label = ""
                 # predicted_labels.append(f"{label}({prob:.4f})")
                 predicted_labels.append(label)
-            print(f"{str(tags):<50} | {str(predicted_labels):<50}")
+            print(f"{str(email['Tags']):<50} | {str(predicted_labels):<50}")
             print("-" * 100)
         print("\nTraining completed successfully!")
     except Exception as e:
         print(f"Error during training: {e}")
 
 
+def predict_with_fine_tune(emails):
+    llm = LLMTagModel(api_key)
+    llm._all_tags = get_all_tags()
+    for email in emails:
+        llm.predict(email)
+
+
+def main(args):
+    """Main predict function"""
+    emails = read_emails()
+    if args.random_forest:
+        predict_with_random_forest(emails)
+    elif args.fine_tune:
+        predict_with_fine_tune(emails)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    arg_parser = argparse.ArgumentParser(description="Reddit scraper")
+    arg_parser.add_argument("--random-forest", action="store_true")
+    arg_parser.add_argument("--fine-tune", action="store_true")
+    args = arg_parser.parse_args()
+
+    sys.exit(main(args))

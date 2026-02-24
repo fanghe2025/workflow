@@ -10,9 +10,18 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from utils.db import get_all_tags
 from utils.sanitize import hash_email, hash_emails, replace_pii_in_text
 
 logger = logging.getLogger(__name__)
+
+
+SYSTEM_CONTENT = (
+    "You are an email tagging classifier. "
+    "Choose 0 to 4 tags from ALLOWED_TAGS. "
+    "If none apply, return an empty list. "
+    'Output ONLY valid JSON like: {"tags": ["tagA", "tagB"]}.'
+)
 
 
 class LLMTagModel:
@@ -31,9 +40,10 @@ class LLMTagModel:
             model: OpenAI chat model name.
             api_key: OpenAI API key; defaults to OPENAI_API_KEY env.
         """
-        self.model = model
+        self._model = model
         self._api_key = api_key
         self._client = None
+        self._all_tags = None
 
     def _get_client(self):
         """Lazy-load OpenAI client."""
@@ -68,16 +78,11 @@ class LLMTagModel:
             "messages": [
                 {
                     "role": "system",
-                    "content": (
-                        "You are an email tagging classifier. "
-                        "Choose 0 to 4 tags from the allowed list. "
-                        "If none apply, return an empty list. "
-                        'Output ONLY valid JSON like: {"tags": ["tagA", "tagB"]}.'
-                    ),
+                    "content": SYSTEM_CONTENT,
                 },
                 {
                     "role": "user",
-                    "content": f"Recommend tags for this email:\n\n{user_content}",
+                    "content": f"ALLOWED_TAGS: {self._all_tags}\n\n{user_content}",
                 },
                 {
                     "role": "assistant",
@@ -88,10 +93,11 @@ class LLMTagModel:
 
     def _write_train_data(self, emails: List[Dict[str, Any]], path: str):
         """Write jsonl file for train data"""
+        self._all_tags = get_all_tags(emails)
         out_path = Path(path)
         with open(out_path, "w", encoding="utf-8") as f:
-            for e in emails:
-                ex = self._email_to_finetune_example(e)
+            for email in emails:
+                ex = self._email_to_finetune_example(email)
                 f.write(json.dumps(ex, ensure_ascii=False) + "\n")
 
         print(f"Wrote {len(emails)} examples to {out_path}")
@@ -112,12 +118,12 @@ class LLMTagModel:
     def _remove_train_data(self, file_id):
         client = self._get_client()
         client.files.delete(file_id)
-        print(f"Delete train data: {file_id}")
+        print(f"Deleted fine tune file: {file_id}")
 
     def _start_job(self, file_id):
         client = self._get_client()
         job = client.fine_tuning.jobs.create(
-            model=self.model,
+            model=self._model,
             training_file=file_id,
             suffix="email-tags",
         )
@@ -129,19 +135,23 @@ class LLMTagModel:
         client = self._get_client()
         job = client.fine_tuning.jobs.retrieve(job_id)
 
-        print(f"Fine-tune job >>> ID: {job.id},  Status: {job.status}")
+        print("Fine-tune job ------------------------------")
+        print(f"  ID: {job.id}")
+        print(f"  Status: {job.status}")
+        print(f"  Model: {job.fine_tuned_model}")
         if job.error:
-            print(f"Error: {job.error.message}")
+            print(f"  Error: {job.error.message}")
 
         return job
 
     def _cancel_job(self, job_id):
-        client = self._get_client()
-        job = client.fine_tuning.jobs.cancel(job_id)
-
-        print(f"Canceled Fine-tune job: {job.id}")
-
-        return job
+        job = self._get_job(job_id)
+        if job.status in ["queued", "running"]:
+            client = self._get_client()
+            client.fine_tuning.jobs.cancel(job.id)
+            print(f"Canceled Fine-tune job: {job.id}")
+        else:
+            print(f"Cannot cancel. Job status: {job.status}")
 
     def predict(self, email: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -149,7 +159,6 @@ class LLMTagModel:
 
         Args:
             email: Dict with Subject, Message, Sender, attachments, OtherRecipients
-                   (or subject, body, from). At least subject or body should be set.
 
         Returns:
             Dict with keys:
@@ -159,45 +168,45 @@ class LLMTagModel:
         """
 
         email_text = self._build_email_text(email)
-        if not email_text.strip():
-            return {
-                "labels": [],
-                "all_probabilities": {},
-                "confidence": 0.0,
-            }
-
-        tags_instruction = (
-            "Suggest 1–5 short, lowercase tags (e.g. meeting, invoice, urgent). "
-            "Return ONLY a comma-separated list of tags, no explanation."
-        )
-
-        system_prompt = (
-            "You recommend tags/categories for emails based on their content. "
-            "Be concise and practical."
-        )
-        user_prompt = (
-            f"Recommend tags for this email:\n\n{email_text}\n\n{tags_instruction}"
-        )
 
         client = self._get_client()
-        response = client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
+        response = client.responses.create(
+            model=self._model,
+            input=[
+                {
+                    "role": "system",
+                    "content": SYSTEM_CONTENT,
+                },
+                {
+                    "role": "user",
+                    "content": f"ALLOWED_TAGS: {self._all_tags}\n\n{email_text}",
+                },
             ],
-            temperature=0.2,
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "email_tags",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "tags": {
+                                "type": "array",
+                                "items": {"type": "string", "enum": self._all_tags},
+                                "maxItems": 4,
+                                "uniqueItems": True,
+                            }
+                        },
+                        "required": ["tags"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            temperature=0,
         )
 
-        raw = (response.choices[0].message.content or "").strip()
-        tags = [t.strip() for t in raw.split(",") if t.strip()]
-        all_probs = {tag: 1.0 for tag in tags}
-
-        return {
-            "labels": tags,
-            "all_probabilities": all_probs,
-            "confidence": 1.0 if tags else 0.0,
-        }
+        # Parse and return the tags from the model's output
+        data = json.loads(response.output_text)
+        return data["tags"][:4]  # Limiting to 4 tags max
 
     def predict_batch(self, emails: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Predict tags for multiple emails."""
