@@ -7,7 +7,7 @@ This package exposes:
   - LLMTagModel: LLM-based email tag recommender (OpenAI)
 """
 
-from .db import DatabaseConnection
+from .duckdb import DatabaseConnection
 from .email_downloader import EmailDownloader
 from .llm_tag_model import LLMTagModel
 

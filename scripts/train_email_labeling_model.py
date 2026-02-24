@@ -13,9 +13,9 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.constants import NO_LABEL
-from core.db import DatabaseConnection
 from core.email_labeling_model import EmailLabelingModel
 from core.llm_tag_model import LLMTagModel
+from utils.db import load_emails
 
 
 load_dotenv()
@@ -23,78 +23,6 @@ api_key = os.getenv("OPENAI_API_KEY")
 db_path = os.getenv("DUCKDB_PATH", "data/emails.duckdb")
 fine_tune_file_id = os.getenv("FINE_TUNE_FILE_ID")
 fine_tune_job_id = os.getenv("FINE_TUNE_JOB_ID")
-
-
-def load_emails_from_db(default_tag_name=None) -> List[Dict[str, Any]]:
-    """
-    Load labeled emails from DuckDB or JSON file
-
-    Args:
-        data_path: Path to JSON file (legacy support)
-
-    Returns:
-        List of labeled email dictionaries
-    """
-    # Prefer DuckDB if provided
-    if not os.path.exists(db_path):
-        print(f"Warning: DuckDB file not found: {db_path}")
-        return []
-
-    db = DatabaseConnection(db_path=db_path, auto_init=False)
-    conn = db.connect()
-    # Query emails with labels from threads table
-    # Get the first email (oldest Timestamp) for each thread
-    query = """
-    SELECT 
-        e.Subject,
-        e.Message,
-        e.Sender,
-        e.OtherRecipients,
-        e.attachments,
-        t.Tags
-    FROM emails e
-    LEFT JOIN threads t ON e.ThreadID = t.ThreadID
-    QUALIFY ROW_NUMBER() OVER (PARTITION BY e.ThreadID ORDER BY e.Timestamp ASC) = 1
-    """
-    result = conn.execute(query).fetchall()
-    columns = [
-        "Subject",
-        "Message",
-        "Sender",
-        "OtherRecipients",
-        "attachments",
-        "Tags",
-    ]
-
-    emails = []
-    for row in result:
-        email = dict(zip(columns, row))
-
-        # Parse tags from JSON array string
-        tags = (email["Tags"] or "").strip()
-        tags = [t.strip() for t in tags.strip("[]").split(",") if t.strip()]
-        email["Tags"] = tags or ([default_tag_name] if default_tag_name else [])
-
-        # Parse attachments from JSON array string
-        attachments = email["attachments"]
-        try:
-            attachments = json.loads(attachments)
-        except Exception as e:
-            attachments = []
-        email["attachments"] = attachments
-
-        other_recipients = email["OtherRecipients"]
-        try:
-            other_recipients = json.loads(other_recipients)
-        except Exception as e:
-            other_recipients = []
-        email["OtherRecipients"] = other_recipients
-
-        emails.append(email)
-
-    print(f"Loaded {len(emails)} labeled emails from DuckDB")
-    conn.close()
-    return emails
 
 
 def limit_samples_per_tag(
@@ -140,7 +68,7 @@ def limit_samples_per_tag(
     return [emails[i] for i in sorted(selected_indices)]
 
 
-def train_random_forest(emails):
+def train_with_random_forest(emails):
     # Load configuration
     config_path = Path("config/training_config.json")
     if config_path.exists():
@@ -158,7 +86,7 @@ def train_random_forest(emails):
     Path("data").mkdir(exist_ok=True)
     Path("models").mkdir(exist_ok=True)
 
-    emails = load_emails_from_db(default_tag_name=NO_LABEL)
+    emails = load_emails(db_path, default_tag_name=NO_LABEL)
 
     # Limit to max_samples_per_tag if configured
     training_cfg = config.get("training", {})
@@ -185,12 +113,12 @@ def train_random_forest(emails):
         print(f"Error during training: {e}")
 
 
-def train_fine_tune(upload=False, start_job=False):
+def train_with_fine_tune(upload=False, start_job=False):
     if not api_key:
         print("OPENAI_API_KEY not set. Cannot upload or start job.", file=sys.stderr)
         return 1
 
-    emails = load_emails_from_db()
+    emails = load_emails(db_path)
 
     llm = LLMTagModel(api_key)
     out_path = llm._write_train_data(emails, path="data/finetune_data.jsonl")
@@ -210,9 +138,9 @@ def main(args):
     """Main training function"""
 
     if args.random_forest:
-        train_random_forest()
+        train_with_random_forest()
     elif args.fine_tune:
-        train_fine_tune()
+        train_with_fine_tune()
 
 
 if __name__ == "__main__":

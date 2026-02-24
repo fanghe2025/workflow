@@ -9,7 +9,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
-from core.db import DatabaseConnection
+from core.duckdb import DatabaseConnection
 from core.graph_api_client import GraphAPIClient
 from utils.common import clean_message
 
