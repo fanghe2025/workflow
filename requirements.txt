@@ -26,6 +26,7 @@ email-validator==2.1.0
 # Utilities
 python-dotenv==1.0.0
 requests==2.31.0
+openai==1.99.5
 
 # Microsoft Graph API
 msal==1.28.0

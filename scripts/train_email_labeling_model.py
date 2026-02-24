@@ -1,4 +1,4 @@
-import ast
+import argparse
 import json
 import os
 import random
@@ -7,102 +7,32 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+from dotenv import load_dotenv
+
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.constants import NO_LABEL
-from core.db import DatabaseConnection
 from core.email_labeling_model import EmailLabelingModel
+from core.llm_tag_model import LLMTagModel
+from utils.db import load_emails
 
 
-def load_emails_from_db(db_path: Optional[str] = None) -> List[Dict[str, Any]]:
-    """
-    Load labeled emails from DuckDB or JSON file
-
-    Args:
-        data_path: Path to JSON file (legacy support)
-        db_path: Path to DuckDB database file
-
-    Returns:
-        List of labeled email dictionaries
-    """
-    # Prefer DuckDB if provided
-    if db_path:
-        if not os.path.exists(db_path):
-            print(f"Warning: DuckDB file not found: {db_path}")
-            return []
-
-        db = DatabaseConnection(db_path=db_path, auto_init=False)
-        conn = db.connect()
-        # Query emails with labels from threads table
-        # Get the first email (oldest Timestamp) for each thread
-        query = """
-        SELECT 
-            e.Subject,
-            e.Message,
-            e.Sender,
-            e.OtherRecipients,
-            e.attachments,
-            t.Tags
-        FROM emails e
-        LEFT JOIN threads t ON e.ThreadID = t.ThreadID
-        QUALIFY ROW_NUMBER() OVER (PARTITION BY e.ThreadID ORDER BY e.Timestamp ASC) = 1
-        """
-        result = conn.execute(query).fetchall()
-        columns = [
-            "Subject",
-            "Message",
-            "Sender",
-            "OtherRecipients",
-            "attachments",
-            "Tags",
-        ]
-
-        emails = []
-        for row in result:
-            email = dict(zip(columns, row))
-
-            # Parse tags from JSON array string
-            tags = email["Tags"]
-            try:
-                tags = [t.strip() for t in tags.strip("[]").split(",") if t.strip()]
-                if len(tags) == 0:
-                    email["Tags"] = [NO_LABEL]
-                else:
-                    email["Tags"] = tags
-            except Exception as e:
-                email["Tags"] = [NO_LABEL]
-
-            # Parse attachments from JSON array string
-            attachments = email["attachments"]
-            try:
-                attachments = json.loads(attachments)
-            except Exception as e:
-                attachments = []
-            email["attachments"] = attachments
-
-            other_recipients = email["OtherRecipients"]
-            try:
-                other_recipients = json.loads(other_recipients)
-            except Exception as e:
-                other_recipients = []
-            email["OtherRecipients"] = other_recipients
-
-            emails.append(email)
-
-        print(f"Loaded {len(emails)} labeled emails from DuckDB")
-        conn.close()
-        return emails
-
-    return []
+load_dotenv()
+api_key = os.getenv("OPENAI_API_KEY")
+db_path = os.getenv("DUCKDB_PATH", "data/emails.duckdb")
+max_samples_per_tag = os.getenv("MAX_SAMPLES_PER_TAG")
 
 
 def limit_samples_per_tag(
-    emails: List[Dict[str, Any]], max_per_tag: int, random_state: Optional[int] = 42
+    emails: List[Dict[str, Any]],
+    max_per_tag: int,
+    random_state: Optional[int] = 42,
 ) -> List[Dict[str, Any]]:
     """
     Limit training data to at most max_per_tag emails per tag.
     Emails can have multiple tags; each email is included if it's sampled for any tag.
+    Emails without tags are treated as a separate label group.
 
     Args:
         emails: List of labeled email dicts (must have "Tags" key)
@@ -117,18 +47,21 @@ def limit_samples_per_tag(
 
     rng = random.Random(random_state)
 
-    # Build tag -> emails mapping (by index to preserve uniqueness)
+    # Build tag -> email indices mapping
     tag_to_indices: Dict[str, set] = {}
+
     for i, email in enumerate(emails):
         tags = email.get("Tags", [])
+
         if not tags:
-            continue
+            tags = ["__NO_TAG__"]  # Treat no-tag emails as their own class
+
         for tag in tags:
             if tag not in tag_to_indices:
                 tag_to_indices[tag] = set()
             tag_to_indices[tag].add(i)
 
-    # For each tag, sample at most max_per_tag email indices
+    # Sample per tag
     selected_indices = set()
     for tag, indices in tag_to_indices.items():
         indices_list = list(indices)
@@ -140,8 +73,7 @@ def limit_samples_per_tag(
     return [emails[i] for i in sorted(selected_indices)]
 
 
-def main():
-    """Main training function"""
+def train_with_random_forest(emails):
     # Load configuration
     config_path = Path("config/training_config.json")
     if config_path.exists():
@@ -153,16 +85,13 @@ def main():
 
     # Get paths from config
     paths = config.get("paths", {})
-    db_path = paths.get("db_path", "data/emails.duckdb")
     model_path = paths.get("model_output", "models/email_classifier.pkl")
 
     # Create directories
     Path("data").mkdir(exist_ok=True)
     Path("models").mkdir(exist_ok=True)
 
-    # Load labeled emails (prefer DuckDB, fallback to JSON)
-    print("Loading labeled emails...")
-    emails = load_emails_from_db(db_path=db_path)
+    emails = load_emails(db_path, default_tag_name=NO_LABEL)
 
     # Limit to max_samples_per_tag if configured
     training_cfg = config.get("training", {})
@@ -189,5 +118,46 @@ def main():
         print(f"Error during training: {e}")
 
 
+def train_with_fine_tune(upload=False, start_job=False):
+    if not api_key:
+        print("OPENAI_API_KEY not set. Cannot upload or start job.", file=sys.stderr)
+        return 1
+
+    emails = load_emails(db_path)
+    if max_samples_per_tag:
+        before = len(emails)
+        emails = limit_samples_per_tag(emails, int(max_samples_per_tag))
+        print(
+            f"Limited to {max_samples_per_tag} samples per tag: {before} -> {len(emails)} emails"
+        )
+
+    llm = LLMTagModel(api_key)
+    out_path = llm._write_train_data(emails, path="data/finetune_data.jsonl")
+
+    # upload
+    if not upload:
+        return
+    file_id = llm._upload_train_data(out_path)
+
+    # create job
+    if not start_job:
+        return
+    llm._start_job(file_id=file_id)
+
+
+def main(args):
+    """Main training function"""
+
+    if args.random_forest:
+        train_with_random_forest()
+    elif args.fine_tune:
+        train_with_fine_tune(True, True)
+
+
 if __name__ == "__main__":
-    main()
+    arg_parser = argparse.ArgumentParser(description="Reddit scraper")
+    arg_parser.add_argument("--random-forest", action="store_true")
+    arg_parser.add_argument("--fine-tune", action="store_true")
+    args = arg_parser.parse_args()
+
+    sys.exit(main(args))

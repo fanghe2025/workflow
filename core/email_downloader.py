@@ -5,16 +5,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-try:
-    from openpyxl import Workbook
-    from openpyxl.styles import Font
-    from openpyxl.utils import get_column_letter
+from openpyxl import Workbook
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
 
-    OPENPYXL_AVAILABLE = True
-except ImportError:
-    OPENPYXL_AVAILABLE = False
-
-from core.db import DatabaseConnection
+from core.duckdb import DatabaseConnection
 from core.graph_api_client import GraphAPIClient
 from utils.common import clean_message
 
@@ -321,8 +316,7 @@ class EmailDownloader:
         try:
             body = email.get("body", {})
             body_content = clean_message(body.get("content", ""))
-            from_info = email.get("from", {}).get("emailAddress", {})
-            sender = from_info.get("address", "")
+            sender = email.get("from", {}).get("emailAddress", {}).get("address", "")
             bcc_recipients = [
                 recipient.get("emailAddress", {}).get("address", "")
                 for recipient in email.get("bccRecipients", [])
@@ -453,11 +447,6 @@ class EmailDownloader:
     ):
         """Save emails to Excel file"""
 
-        if not OPENPYXL_AVAILABLE:
-            raise ImportError(
-                "openpyxl is required for Excel export. Install it with: pip install openpyxl"
-            )
-
         if emails is None:
             sql = """
                 SELECT
@@ -465,6 +454,7 @@ class EmailDownloader:
                     emails.ThreadID,
                     threads.Tags,
                     Sender,
+                    OtherRecipients,
                     Subject,
                     attachments,
                     Message,
@@ -486,11 +476,11 @@ class EmailDownloader:
             "ThreadID",
             "Tags",
             "Sender",
+            "OtherRecipients",
             "Subject",
             "attachments",
             "Message",
             "Timestamp",
-            "SentDate",
         ]
         for col_num, header in enumerate(headers, 1):
             cell = ws.cell(row=1, column=col_num)

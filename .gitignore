@@ -56,3 +56,5 @@ logs/
 
 # config
 config/graph_config.json
+
+.env

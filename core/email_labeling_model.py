@@ -5,6 +5,7 @@ This script trains a machine learning model to classify emails based on
 their content, subject, sender, attachments, and other features.
 """
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -22,7 +23,21 @@ import joblib
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.attachment_processor import AttachmentProcessor
-from core.constants import NO_LABEL
+
+
+def _create_base_classifier(model_config: Dict[str, Any]):
+    """Create base classifier from config. Supports random_forest."""
+    model_type = model_config.get("type", "random_forest")
+    random_state = model_config.get("random_state", 42)
+
+    if model_type == "random_forest":
+        return RandomForestClassifier(
+            n_estimators=model_config.get("n_estimators", 100),
+            max_depth=model_config.get("max_depth", 20),
+            random_state=random_state,
+            n_jobs=-1,
+        )
+    raise ValueError(f"Unknown model type: {model_type}. Use random_forest.")
 
 
 class EmailLabelingModel:
@@ -48,13 +63,11 @@ class EmailLabelingModel:
         self.prediction_threshold = prediction_config.get("threshold", 0.1)
 
         model_config = self.config.get("model", {})
-        base_classifier = RandomForestClassifier(
-            n_estimators=model_config.get("n_estimators", 100),
-            max_depth=model_config.get("max_depth", 20),
-            random_state=model_config.get("random_state", 42),
-            n_jobs=-1,
-        )
+        model_type = model_config.get("type", "random_forest")
+        base_classifier = _create_base_classifier(model_config)
         self.model = MultiOutputClassifier(base_classifier, n_jobs=-1)
+        logger = logging.getLogger(__name__)
+        logger.info("Using model type: %s", model_type)
         self.label_binarizer = MultiLabelBinarizer()
         self.label_list = []  # Store list of all unique labels
         self.is_trained = False
@@ -75,7 +88,7 @@ class EmailLabelingModel:
             sender = email["Sender"]
             attachment_names = email["attachments"]
             other_recipients = email["OtherRecipients"]
-            
+
             # text_parts = [subject, body, sender]
             text_parts = [subject, sender]
             if other_recipients:

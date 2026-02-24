@@ -13,7 +13,7 @@ from typing import List, Dict, Any
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from utils.attachment_processor import AttachmentProcessor
+from core.attachment_processor import AttachmentProcessor
 
 
 def process_emails_with_attachments(
