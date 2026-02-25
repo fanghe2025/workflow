@@ -144,6 +144,24 @@ class LLMTagModel:
 
         return job
 
+    def _list_jobs(self):
+        client = self._get_client()
+        jobs = client.fine_tuning.jobs.list()
+        for job in jobs:
+            print(f"  ID: {job.id}")
+            print(f"  Status: {job.status}")
+            print(f"  Model: {job.fine_tuned_model}")
+
+    def _resume_job(self, job_id):
+        client = self._get_client()
+        client.fine_tuning.jobs.resume(job_id)
+        print(f"Resumed Fine-tune job: {job_id}")
+
+    def _delete_model(self, model_id):
+        client = self._get_client()
+        client.models.delete(model_id)
+        print(f"Deleted fine tune model: {model_id}")
+
     def _cancel_job(self, job_id):
         job = self._get_job(job_id)
         if job.status in ["queued", "running"]:

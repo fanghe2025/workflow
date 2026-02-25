@@ -27,7 +27,7 @@ from typing import List, Dict
 load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
 fine_tune_job_id = os.getenv("FINE_TUNE_JOB_ID")
-fine_tune_model = os.getenv("FINE_TUNED_MODEL")
+fine_tune_model_id = os.getenv("FINE_TUNE_MODEL_ID")
 
 
 def clean_no_label(labels: List[str], all_probs: Dict[str, float]) -> List[str]:
@@ -117,7 +117,7 @@ def predict_with_random_forest(emails):
 
 
 def predict_with_fine_tune(emails):
-    llm = LLMTagModel(api_key, model=fine_tune_model)
+    llm = LLMTagModel(api_key, model=fine_tune_model_id)
     llm._all_tags = get_all_tags()
     print(f"{'Original Tags':<50} | {'Predicted Tags'}")
     print("-" * 100)
