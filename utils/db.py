@@ -2,27 +2,32 @@ import json
 import os
 
 from core.duckdb import DatabaseConnection
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+
+from config import env
 
 
 def load_emails(
-    db_path="data/emails.duckdb", default_tag_name=None
+    default_tag_name=None,
+    year: Optional[int] = None,
+    folder: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Load labeled emails from DuckDB or JSON file
+    Load labeled emails from DuckDB or JSON file.
 
     Args:
-        data_path: Path to JSON file (legacy support)
+        default_tag_name: Tag to use when thread has no tags.
+        year: If set, only load emails from this year (by e.Timestamp).
+        folder: If set, only load emails from this folder (inbox, archive, etc.).
 
     Returns:
-        List of labeled email dictionaries
+        List of labeled email dictionaries.
     """
-    # Prefer DuckDB if provided
-    if not os.path.exists(db_path):
-        print(f"Warning: DuckDB file not found: {db_path}")
+    if not os.path.exists(env.get("DB_PATH")):
+        print(f"Warning: DuckDB file not found")
         return []
 
-    db = DatabaseConnection(db_path=db_path, auto_init=False)
+    db = DatabaseConnection(db_path=env.get("DB_PATH"), auto_init=False)
     conn = db.connect()
     # Query emails with labels from threads table
     # Get the first email (oldest Timestamp) for each thread
@@ -36,9 +41,19 @@ def load_emails(
         t.Tags
     FROM emails e
     LEFT JOIN threads t ON e.ThreadID = t.ThreadID
+    WHERE 1=1
+    """
+    params = []
+    if year is not None:
+        query += " AND YEAR(e.Timestamp) = ?"
+        params.append(year)
+    if folder is not None:
+        query += " AND t.current_folder = ?"
+        params.append(folder)
+    query += """
     QUALIFY ROW_NUMBER() OVER (PARTITION BY e.ThreadID ORDER BY e.Timestamp ASC) = 1
     """
-    result = conn.execute(query).fetchall()
+    result = conn.execute(query, params).fetchall()
     columns = [
         "Subject",
         "Message",

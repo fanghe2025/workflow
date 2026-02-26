@@ -70,14 +70,14 @@ class _Env:
     def __init__(self) -> None:
         load_dotenv()
 
+    @property
+    def DUCKDB_PATH(self) -> str:
+        return os.getenv("DUCKDB_PATH", "data/emails.duckdb")
+
     # OpenAI / fine-tune
     @property
     def OPENAI_API_KEY(self) -> str:
         return os.getenv("OPENAI_API_KEY", "")
-
-    @property
-    def DUCKDB_PATH(self) -> str:
-        return os.getenv("DUCKDB_PATH", "data/emails.duckdb")
 
     @property
     def FINE_TUNE_FILE_ID(self) -> str:
@@ -90,11 +90,6 @@ class _Env:
     @property
     def FINE_TUNE_MODEL_ID(self) -> str:
         return os.getenv("FINE_TUNE_MODEL_ID", "")
-
-    @property
-    def MAX_SAMPLES_PER_TAG(self) -> str | None:
-        v = os.getenv("MAX_SAMPLES_PER_TAG", "").strip()
-        return v if v else None
 
     # Microsoft Graph (moved from graph_config.json)
     @property
