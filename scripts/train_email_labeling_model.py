@@ -114,8 +114,7 @@ def train_with_fine_tune(upload=False, start_job=False):
     validation_frac = training_cfg.get("test_size", 0.2)
     random_state = training_cfg.get("random_state", 42)
 
-    this_year = date.today().year
-    emails = load_emails(year=this_year, folder="archive")
+    emails = load_emails(folder="archive")
     if training_cfg.get("max_samples_per_tag") > 0:
         before = len(emails)
         emails = limit_samples_per_tag(
@@ -138,7 +137,7 @@ def train_with_fine_tune(upload=False, start_job=False):
     validation_emails = [emails[i] for i in indices if i in val_indices]
     print(f"Split: {len(train_emails)} train, {len(validation_emails)} validation")
 
-    llm = LLMTagModel(env.OPENAI_API_KEY, model=env.FINE_TUNE_MODEL_ID)
+    llm = LLMTagModel(env.OPENAI_API_KEY)
     llm._all_tags = get_all_tags(emails)
     llm._write_finetune_jsonl(train_emails, train_file)
     llm._write_finetune_jsonl(validation_emails, validation_file)
@@ -173,8 +172,7 @@ def retrain_with_fine_tune(upload=False, start_job=False):
     random_state = training_cfg.get("random_state", 42)
 
     this_year = date.today().year
-    emails = load_emails(year=this_year)
-
+    emails = load_emails(year=this_year, folder="archive")
     if not emails:
         print("No emails found for this year. Exiting.")
         return 1
@@ -189,7 +187,7 @@ def retrain_with_fine_tune(upload=False, start_job=False):
     validation_emails = [emails[i] for i in indices if i in val_indices]
     print(f"Split: {len(train_emails)} train, {len(validation_emails)} validation")
 
-    llm = LLMTagModel(env.OPENAI_API_KEY)
+    llm = LLMTagModel(env.OPENAI_API_KEY, model=env.FINE_TUNE_MODEL_ID)
     llm._all_tags = get_all_tags()
     llm._write_finetune_jsonl(train_emails, train_file)
     llm._write_finetune_jsonl(validation_emails, validation_file)
@@ -211,12 +209,12 @@ def retrain_with_fine_tune(upload=False, start_job=False):
 
 def main(args):
     """Main training function"""
-    train_with_fine_tune()
+
     if args.random_forest:
         train_with_random_forest()
     elif args.fine_tune:
         train_with_fine_tune(True, True)
-    elif args.fine_tune_retrain:
+    elif args.retrain_fine_tune:
         retrain_with_fine_tune(True, True)
 
 
@@ -224,7 +222,7 @@ if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser(description="Reddit scraper")
     arg_parser.add_argument("--random-forest", action="store_true")
     arg_parser.add_argument("--fine-tune", action="store_true")
-    arg_parser.add_argument("--fine-tune-retrain", action="store_true")
+    arg_parser.add_argument("--retrain-fine-tune", action="store_true")
     args = arg_parser.parse_args()
 
     sys.exit(main(args))

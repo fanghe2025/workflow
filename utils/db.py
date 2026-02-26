@@ -23,11 +23,11 @@ def load_emails(
     Returns:
         List of labeled email dictionaries.
     """
-    if not os.path.exists(env.get("DB_PATH")):
+    if not os.path.exists(env.DUCKDB_PATH):
         print(f"Warning: DuckDB file not found")
         return []
 
-    db = DatabaseConnection(db_path=env.get("DB_PATH"), auto_init=False)
+    db = DatabaseConnection(db_path=env.DUCKDB_PATH, auto_init=False)
     conn = db.connect()
     # Query emails with labels from threads table
     # Get the first email (oldest Timestamp) for each thread
@@ -101,4 +101,5 @@ def get_all_tags(emails=None):
     all_unique_labels = sorted(
         set(label for label_list in labels for label in label_list)
     )
+    print(f"All unique tags({len(all_unique_labels)}): {all_unique_labels}")
     return all_unique_labels
