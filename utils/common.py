@@ -3,28 +3,10 @@ Common utility functions for email processing scripts
 """
 
 import re
-from pathlib import Path
-from typing import Dict, Any
-import json
 
 from mailparser_reply import EmailReplyParser
 
-from utils.sanitize import hash_email, hash_emails, replace_pii_in_text
-
-
-def load_config(config_path: str = "config/graph_config.json") -> Dict[str, Any]:
-    """Load Graph API configuration from JSON file"""
-    config_file = Path(config_path)
-    if not config_file.exists():
-        print(f"Config file not found: {config_path}")
-        return {}
-
-    try:
-        with open(config_file, "r") as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"Error loading config: {e}")
-        return {}
+from utils.sanitize import replace_pii_in_text
 
 
 def clean_message(message: str) -> str:

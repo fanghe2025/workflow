@@ -6,7 +6,6 @@ FastAPI server that provides prediction endpoints for the trained email labeling
 
 import os
 import sys
-import json
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, HTTPException, status
@@ -18,6 +17,7 @@ import logging
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.email_labeling_model import EmailLabelingModel
+from config import config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -45,24 +45,15 @@ def load_model():
     """Load the trained model"""
     global model
     try:
-        # Load config to get model path
-        config_path = Path("config/training_config.json")
-        if config_path.exists():
-            with open(config_path, "r") as f:
-                config = json.load(f)
-            model_path = config.get("paths", {}).get(
-                "model_output", "models/email_classifier.pkl"
-            )
-        else:
-            model_path = "models/email_classifier.pkl"
+        model_path = config.get("paths", {}).get(
+            "model_output", "models/email_classifier.pkl"
+        )
 
         if not os.path.exists(model_path):
             logger.warning(f"Model file not found: {model_path}")
             return False
 
-        model = EmailLabelingModel(
-            model_path=model_path, config=config if config_path.exists() else {}
-        )
+        model = EmailLabelingModel(model_path=model_path, config=config)
         model.load()
         logger.info("Model loaded successfully")
         return True

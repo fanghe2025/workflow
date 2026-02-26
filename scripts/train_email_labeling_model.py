@@ -1,13 +1,10 @@
 import argparse
 import json
-import os
 import random
 import sys
-
+from datetime import date
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-
-from dotenv import load_dotenv
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -15,13 +12,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.constants import NO_LABEL
 from core.email_labeling_model import EmailLabelingModel
 from core.llm_tag_model import LLMTagModel
-from utils.db import load_emails
-
-
-load_dotenv()
-api_key = os.getenv("OPENAI_API_KEY")
-db_path = os.getenv("DUCKDB_PATH", "data/emails.duckdb")
-max_samples_per_tag = os.getenv("MAX_SAMPLES_PER_TAG")
+from config import config, env
+from utils.db import get_all_tags, load_emails
 
 
 def limit_samples_per_tag(
@@ -74,16 +66,7 @@ def limit_samples_per_tag(
 
 
 def train_with_random_forest(emails):
-    # Load configuration
-    config_path = Path("config/training_config.json")
-    if config_path.exists():
-        with open(config_path, "r") as f:
-            config = json.load(f)
-    else:
-        config = {}
-        print("Warning: training_config.json not found. Using defaults.")
-
-    # Get paths from config
+    # Get paths from config (from utils.config)
     paths = config.get("paths", {})
     model_path = paths.get("model_output", "models/email_classifier.pkl")
 
@@ -91,7 +74,7 @@ def train_with_random_forest(emails):
     Path("data").mkdir(exist_ok=True)
     Path("models").mkdir(exist_ok=True)
 
-    emails = load_emails(db_path, default_tag_name=NO_LABEL)
+    emails = load_emails(default_tag_name=NO_LABEL)
 
     # Limit to max_samples_per_tag if configured
     training_cfg = config.get("training", {})
@@ -119,30 +102,124 @@ def train_with_random_forest(emails):
 
 
 def train_with_fine_tune(upload=False, start_job=False):
-    if not api_key:
+    if not env.OPENAI_API_KEY:
         print("OPENAI_API_KEY not set. Cannot upload or start job.", file=sys.stderr)
         return 1
 
-    emails = load_emails(db_path)
-    if max_samples_per_tag:
+    fine_tune_cfg = config.get("fine_tune", {})
+    training_cfg = config.get("training", {})
+
+    train_file = fine_tune_cfg.get("train_file", "data/finetune_train.jsonl")
+    validation_file = fine_tune_cfg.get("validation_file", "data/finetune_valid.jsonl")
+    n_epochs = fine_tune_cfg.get("n_epochs", 3)
+    validation_frac = training_cfg.get("test_size", 0.2)
+    random_state = training_cfg.get("random_state", 42)
+
+    emails = load_emails(folder="archive")
+    if training_cfg.get("max_samples_per_tag") > 0:
         before = len(emails)
-        emails = limit_samples_per_tag(emails, int(max_samples_per_tag))
-        print(
-            f"Limited to {max_samples_per_tag} samples per tag: {before} -> {len(emails)} emails"
+        emails = limit_samples_per_tag(
+            emails, training_cfg.get("max_samples_per_tag"), random_state
         )
+        print(
+            f"Limited to {training_cfg.get('max_samples_per_tag')} samples per tag: {before} -> {len(emails)} emails"
+        )
+    if not emails:
+        print("No emails found for this year. Exiting.")
+        return 1
 
-    llm = LLMTagModel(api_key)
-    out_path = llm._write_train_data(emails, path="data/finetune_data.jsonl")
+    # Train / validation split
+    rng = random.Random(random_state)
+    indices = list(range(len(emails)))
+    rng.shuffle(indices)
+    n_val = max(1, int(len(emails) * validation_frac))
+    val_indices = set(indices[:n_val])
+    train_emails = [emails[i] for i in indices if i not in val_indices]
+    validation_emails = [emails[i] for i in indices if i in val_indices]
+    print(f"Split: {len(train_emails)} train, {len(validation_emails)} validation")
 
-    # upload
+    llm = LLMTagModel(env.OPENAI_API_KEY)
+    llm._all_tags = get_all_tags(emails)
+    llm._write_finetune_jsonl(train_emails, train_file)
+    llm._write_finetune_jsonl(validation_emails, validation_file)
+
     if not upload:
-        return
-    file_id = llm._upload_train_data(out_path)
+        return 0
+    train_file_id = llm._upload_train_data(train_file)
+    validation_file_id = llm._upload_train_data(validation_file)
 
-    # create job
     if not start_job:
-        return
-    llm._start_job(file_id=file_id)
+        return 0
+    llm._start_job(
+        file_id=train_file_id,
+        validation_file_id=validation_file_id,
+        n_epochs=n_epochs,
+    )
+    return 0
+
+
+def retrain_fine_tune(
+    upload: bool = False,
+    start_job: bool = False,
+    emails_path: Optional[str] = None,
+) -> int:
+    """
+    Retrain the fine-tuned model from current FINE_TUNE_MODEL_ID.
+    Source: if incorrect_path is set and file exists, use that JSONL (from predict export);
+    otherwise load emails from DB (this year, archive folder), convert to JSONL, then train/val split.
+    """
+    if not env.OPENAI_API_KEY:
+        print("OPENAI_API_KEY not set. Cannot upload or start job.", file=sys.stderr)
+        return 1
+
+    fine_tune_cfg = config.get("fine_tune", {})
+    training_cfg = config.get("training", {})
+    train_file = fine_tune_cfg.get("train_file", "data/finetune_train.jsonl")
+    validation_file = fine_tune_cfg.get("validation_file", "data/finetune_valid.jsonl")
+    n_epochs = fine_tune_cfg.get("n_epochs", 3)
+    validation_frac = training_cfg.get("test_size", 0.2)
+    random_state = training_cfg.get("random_state", 42)
+    rng = random.Random(random_state)
+
+    use_incorrect = emails_path and Path(emails_path).exists()
+
+    if use_incorrect:
+        path = Path(emails_path)
+        with open(path, "r", encoding="utf-8") as f:
+            emails = json.load(f)
+    else:
+        this_year = date.today().year
+        emails = load_emails(year=this_year, folder="archive")
+    if not emails:
+        print("No emails found")
+        return 1
+    indices = list(range(len(emails)))
+    rng.shuffle(indices)
+    n_val = max(1, int(len(emails) * validation_frac))
+    val_indices = set(indices[:n_val])
+    train_emails = [emails[i] for i in indices if i not in val_indices]
+    validation_emails = [emails[i] for i in indices if i in val_indices]
+    print(
+        f"Retrain from DB: {len(train_emails)} train, {len(validation_emails)} validation"
+    )
+    llm = LLMTagModel(env.OPENAI_API_KEY, model=env.FINE_TUNE_MODEL_ID)
+    llm._all_tags = get_all_tags()
+    llm._write_finetune_jsonl(train_emails, train_file)
+    llm._write_finetune_jsonl(validation_emails, validation_file)
+
+    llm = LLMTagModel(env.OPENAI_API_KEY, model=env.FINE_TUNE_MODEL_ID)
+    if not upload:
+        return 0
+    train_file_id = llm._upload_train_data(train_file)
+    validation_file_id = llm._upload_train_data(validation_file)
+    if not start_job:
+        return 0
+    llm._start_job(
+        file_id=train_file_id,
+        validation_file_id=validation_file_id,
+        n_epochs=n_epochs,
+    )
+    return 0
 
 
 def main(args):
@@ -152,12 +229,30 @@ def main(args):
         train_with_random_forest()
     elif args.fine_tune:
         train_with_fine_tune(True, True)
+    elif args.retrain_fine_tune:
+        return retrain_fine_tune(
+            upload=True,
+            start_job=True,
+            emails_path=args.emails_path,
+        )
 
 
 if __name__ == "__main__":
-    arg_parser = argparse.ArgumentParser(description="Reddit scraper")
+    arg_parser = argparse.ArgumentParser(description="Email labeling training")
     arg_parser.add_argument("--random-forest", action="store_true")
     arg_parser.add_argument("--fine-tune", action="store_true")
+    arg_parser.add_argument(
+        "--retrain-fine-tune",
+        action="store_true",
+        help="Retrain from FINE_TUNE_MODEL_ID using DB (this year, archive) or --emails-path file",
+    )
+    arg_parser.add_argument(
+        "--emails-path",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Use this JSONL (e.g. data/incorrect_emails.jsonl) as retrain data; else use DB",
+    )
     args = arg_parser.parse_args()
 
     sys.exit(main(args))

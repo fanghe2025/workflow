@@ -16,7 +16,8 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from utils.common import load_config, clean_message
+from config import env
+from utils.common import clean_message
 from utils.graph import get_authenticated_api_client
 from core.email_downloader import EmailDownloader
 
@@ -123,11 +124,10 @@ def main(args):
         return 1
 
     # Download and store emails
-    config = load_config("config/graph_config.json")
-    db_path = config.get("db_path", "data/emails.duckdb")
-    attachments_dir = config.get("attachments_dir", "data/attachments")
-    filter_query = config.get("filter")
-    batch_size = config.get("batch_size", 100)
+    db_path = env.DUCKDB_PATH
+    attachments_dir = env.ATTACHMENTS_DIR
+    filter_query = env.GRAPH_FILTER
+    batch_size = env.BATCH_SIZE
 
     downloader = EmailDownloader(
         api_client, db_path=db_path, attachments_dir=attachments_dir

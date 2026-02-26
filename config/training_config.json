@@ -1,40 +1,44 @@
 {
-  "model": {
-    "type": "random_forest",
-    "n_estimators": 100,
-    "max_depth": 20,
-    "random_state": 42
-  },
-  "vectorizer": {
-    "max_features": 5000,
-    "ngram_range": [1, 2],
-    "min_df": 2,
-    "max_df": 0.95
-  },
-  "training": {
-    "test_size": 0.2,
-    "random_state": 42,
-    "max_samples_per_tag": 0
-  },
-  "prediction": {
-    "threshold": 0.1
-  },
-  "paths": {
-    "labeled_data": "data/labeled_emails.json",
-    "db_path": "data/emails.duckdb",
-    "model_output": "models/email_classifier.pkl"
-  },
-  "attachment_processing": {
-    "enabled": false,
-    "max_file_size_mb": 10,
-    "supported_formats": [
-      "pdf",
-      "docx",
-      "doc",
-      "txt",
-      "xlsx",
-      "xls"
-    ],
-    "extract_text_from_images": false
-  }
+    "model": {
+        "type": "random_forest",
+        "n_estimators": 100,
+        "max_depth": 20,
+        "random_state": 42
+    },
+    "vectorizer": {
+        "max_features": 5000,
+        "ngram_range": [1, 2],
+        "min_df": 2,
+        "max_df": 0.95
+    },
+    "training": {
+        "test_size": 0.2,
+        "random_state": 42,
+        "max_samples_per_tag": 0
+    },
+    "fine_tune": {
+        "train_file": "data/finetune_train.jsonl",
+        "validation_file": "data/finetune_valid.jsonl",
+        "n_epochs": 3
+    },
+    "prediction": {
+        "threshold": 0.1
+    },
+    "paths": {
+        "labeled_data": "data/labeled_emails.json",
+        "model_output": "models/email_classifier.pkl"
+    },
+    "attachment_processing": {
+        "enabled": false,
+        "max_file_size_mb": 10,
+        "supported_formats": [
+            "pdf",
+            "docx",
+            "doc",
+            "txt",
+            "xlsx",
+            "xls"
+        ],
+        "extract_text_from_images": false
+    }
 }
