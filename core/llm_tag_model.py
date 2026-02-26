@@ -92,16 +92,19 @@ class LLMTagModel:
         }
 
     def _write_train_data(self, emails: List[Dict[str, Any]], path: str):
-        """Write jsonl file for train data"""
+        """Write jsonl file for train data (sets _all_tags from emails)."""
         self._all_tags = get_all_tags(emails)
+        return self._write_finetune_jsonl(emails, path)
+
+    def _write_finetune_jsonl(self, emails: List[Dict[str, Any]], path: str):
+        """Write emails to JSONL in fine-tune format. Requires _all_tags to be set."""
         out_path = Path(path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         with open(out_path, "w", encoding="utf-8") as f:
             for email in emails:
                 ex = self._email_to_finetune_example(email)
                 f.write(json.dumps(ex, ensure_ascii=False) + "\n")
-
         print(f"Wrote {len(emails)} examples to {out_path}")
-
         return out_path
 
     def _upload_train_data(self, path):
@@ -120,13 +123,23 @@ class LLMTagModel:
         client.files.delete(file_id)
         print(f"Deleted fine tune file: {file_id}")
 
-    def _start_job(self, file_id):
+    def _start_job(
+        self,
+        file_id: str,
+        validation_file_id: Optional[str] = None,
+        n_epochs: Optional[int] = None,
+    ):
         client = self._get_client()
-        job = client.fine_tuning.jobs.create(
-            model=self._model,
-            training_file=file_id,
-            suffix="email-tags",
-        )
+        kwargs = {
+            "model": self._model,
+            "training_file": file_id,
+            "suffix": "email-tags",
+        }
+        if validation_file_id is not None:
+            kwargs["validation_file"] = validation_file_id
+        if n_epochs is not None:
+            kwargs["hyperparameters"] = {"n_epochs": n_epochs}
+        job = client.fine_tuning.jobs.create(**kwargs)
         print(f"Fine-tuning job created: {job.id}")
         print(f"  Status: {job.status}")
         print(f"  Monitor: https://platform.openai.com/fine_tuning/jobs/{job.id}")

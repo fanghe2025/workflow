@@ -8,26 +8,20 @@ This script uses Microsoft Graph API to:
 """
 
 import argparse
-import os
+import json
 import sys
 from pathlib import Path
-
-from dotenv import load_dotenv
+from typing import List, Dict
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.constants import NO_LABEL
 from core.email_labeling_model import EmailLabelingModel
 from core.llm_tag_model import LLMTagModel
+from config import env
 from utils.graph import get_authenticated_api_client
 from utils.common import clean_message
 from utils.db import get_all_tags
-from typing import List, Dict
-
-load_dotenv()
-api_key = os.getenv("OPENAI_API_KEY")
-fine_tune_job_id = os.getenv("FINE_TUNE_JOB_ID")
-fine_tune_model_id = os.getenv("FINE_TUNE_MODEL_ID")
 
 
 def clean_no_label(labels: List[str], all_probs: Dict[str, float]) -> List[str]:
@@ -116,14 +110,37 @@ def predict_with_random_forest(emails):
         print(f"Error during training: {e}")
 
 
+def _tags_match(correct: List, predicted: List) -> bool:
+    """Compare tag lists (order-independent)."""
+    return sorted(correct or []) == sorted(predicted or [])
+
+
 def predict_with_fine_tune(emails):
-    llm = LLMTagModel(api_key, model=fine_tune_model_id)
+    llm = LLMTagModel(env.OPENAI_API_KEY, model=env.FINE_TUNE_MODEL_ID)
     llm._all_tags = get_all_tags()
+    incorrect_emails = []
+
     print(f"{'Original Tags':<50} | {'Predicted Tags'}")
     print("-" * 100)
     for email in emails:
         predicted_tags = llm.predict(email)
-        print(f"{str(email['Tags']):<50} | {str(predicted_tags):<50}")
+        correct_tags = email.get("Tags") or []
+        print(f"{str(correct_tags):<50} | {str(predicted_tags):<50}")
+        if not _tags_match(correct_tags, predicted_tags):
+            incorrect_emails.append(email)
+
+    if incorrect_emails:
+        out_path = Path("data/incorrect_emails.jsonl")
+        with open(out_path, "w", encoding="utf-8") as f:
+            for email in incorrect_emails:
+                ex = llm._email_to_finetune_example(email)
+                f.write(json.dumps(ex, ensure_ascii=False) + "\n")
+        print(
+            f"\nExported {len(incorrect_emails)} incorrect sample(s) to {out_path} (fine-tune JSONL format)."
+        )
+    elif incorrect_emails:
+        print(f"\nIncorrect predictions: {len(incorrect_emails)} / {len(emails)}")
+    return incorrect_emails
 
 
 def main(args):
