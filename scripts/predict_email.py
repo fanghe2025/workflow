@@ -21,7 +21,7 @@ from core.llm_tag_model import LLMTagModel
 from config import env
 from utils.graph import get_authenticated_api_client
 from utils.common import clean_message
-from utils.db import get_all_tags
+from utils.db import get_all_tags, load_emails_recent_per_tag
 
 
 def clean_no_label(labels: List[str], all_probs: Dict[str, float]) -> List[str]:
@@ -83,10 +83,10 @@ def read_emails():
     return cleaned_emails
 
 
-def predict_with_random_forest(emails):
-    # Initialize and predict model
+def predict_with_random_forest(emails, show_percent: bool = False):
     model = EmailLabelingModel(model_path="models/email_classifier.pkl")
     model.load()
+    results_for_percent = []
 
     try:
         print(f"{'Original Tags':<50} | {'Predicted Tags'}")
@@ -98,16 +98,20 @@ def predict_with_random_forest(emails):
                 prediction["labels"], prediction["all_probabilities"]
             )
             for label in cleaned:
-                prob = prediction["all_probabilities"][label]
                 if label == NO_LABEL:
                     label = ""
-                # predicted_labels.append(f"{label}({prob:.4f})")
                 predicted_labels.append(label)
+            if show_percent:
+                results_for_percent.append(
+                    {"correct": email.get("Tags") or [], "predicted": predicted_labels}
+                )
             print(f"{str(email['Tags']):<50} | {str(predicted_labels):<50}")
             print("-" * 100)
-        print("\nTraining completed successfully!")
+        if show_percent and results_for_percent:
+            _compute_percent_per_tag(emails, results_for_percent)
+        print("\nPrediction completed successfully!")
     except Exception as e:
-        print(f"Error during training: {e}")
+        print(f"Error during prediction: {e}")
 
 
 def _tags_match(correct: List, predicted: List) -> bool:
@@ -115,47 +119,106 @@ def _tags_match(correct: List, predicted: List) -> bool:
     return sorted(correct or []) == sorted(predicted or [])
 
 
-def predict_with_fine_tune(emails):
+def _compute_percent_per_tag(emails: List[Dict], results: List[Dict]) -> None:
+    """results: list of {"correct": [...], "predicted": [...]}."""
+    tag_total: Dict[str, int] = {}
+    tag_correct: Dict[str, int] = {}
+    exact_match_total = 0
+    exact_match_correct = 0
+    for email, res in zip(emails, results):
+        correct = set(res["correct"])
+        predicted = set(res["predicted"])
+        if _tags_match(list(correct), list(predicted)):
+            exact_match_correct += 1
+        exact_match_total += 1
+        for t in correct:
+            tag_total[t] = tag_total.get(t, 0) + 1
+            if t in predicted:
+                tag_correct[t] = tag_correct.get(t, 0) + 1
+    print("\n--- Percent per tag (recall: correct had tag and predicted had tag) ---")
+    for tag in sorted(tag_total.keys()):
+        total = tag_total[tag]
+        correct = tag_correct.get(tag, 0)
+        pct = (100.0 * correct / total) if total else 0
+        print(f"  {tag}: {correct}/{total} = {pct:.1f}%")
+    if exact_match_total:
+        exact_pct = 100.0 * exact_match_correct / exact_match_total
+        print(
+            f"\nExact match (all tags correct): {exact_match_correct}/{exact_match_total} = {exact_pct:.1f}%"
+        )
+
+
+def predict_with_fine_tune(emails, show_percent: bool = False):
     llm = LLMTagModel(env.OPENAI_API_KEY, model=env.FINE_TUNE_MODEL_ID)
     llm._all_tags = get_all_tags()
     incorrect_emails = []
+    results_for_percent = []
 
     print(f"{'Original Tags':<50} | {'Predicted Tags'}")
     print("-" * 100)
     for email in emails:
         predicted_tags = llm.predict(email)
         correct_tags = email.get("Tags") or []
+        if show_percent:
+            results_for_percent.append(
+                {"correct": correct_tags, "predicted": predicted_tags}
+            )
         print(f"{str(correct_tags):<50} | {str(predicted_tags):<50}")
         if not _tags_match(correct_tags, predicted_tags):
             incorrect_emails.append(email)
 
+    if show_percent and results_for_percent:
+        _compute_percent_per_tag(emails, results_for_percent)
+
     if incorrect_emails:
-        out_path = Path("data/incorrect_emails.jsonl")
-        with open(out_path, "w", encoding="utf-8") as f:
-            for email in incorrect_emails:
-                ex = llm._email_to_finetune_example(email)
-                f.write(json.dumps(ex, ensure_ascii=False) + "\n")
-        print(
-            f"\nExported {len(incorrect_emails)} incorrect sample(s) to {out_path} (fine-tune JSONL format)."
-        )
-    elif incorrect_emails:
-        print(f"\nIncorrect predictions: {len(incorrect_emails)} / {len(emails)}")
+        json_path = Path("data/incorrect_emails.json")
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(incorrect_emails, f, ensure_ascii=False, indent=2)
+        print(f"Exported {len(incorrect_emails)} incorrect sample(s) to {json_path}")
+    elif not show_percent:
+        print(f"Incorrect predictions: {len(incorrect_emails)} / {len(emails)}")
     return incorrect_emails
 
 
 def main(args):
     """Main predict function"""
-    emails = read_emails()
+    if args.from_db:
+        emails = load_emails_recent_per_tag()
+    else:
+        emails = read_emails()
+    if not emails:
+        print("No emails to predict.")
+        return 1
     if args.random_forest:
-        predict_with_random_forest(emails)
+        predict_with_random_forest(emails, show_percent=args.percent)
     elif args.fine_tune:
-        predict_with_fine_tune(emails)
+        predict_with_fine_tune(emails, show_percent=args.percent)
+    else:
+        print("Specify --random-forest or --fine-tune")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    arg_parser = argparse.ArgumentParser(description="Reddit scraper")
-    arg_parser.add_argument("--random-forest", action="store_true")
-    arg_parser.add_argument("--fine-tune", action="store_true")
+    arg_parser = argparse.ArgumentParser(
+        description="Email prediction (Graph API or DuckDB)"
+    )
+    arg_parser.add_argument(
+        "--random-forest", action="store_true", help="Use random forest model"
+    )
+    arg_parser.add_argument(
+        "--fine-tune", action="store_true", help="Use fine-tuned LLM model"
+    )
+    arg_parser.add_argument(
+        "--from-db",
+        action="store_true",
+        help="Read emails from DuckDB (recent N per tag) instead of Graph API",
+    )
+    arg_parser.add_argument(
+        "--percent",
+        action="store_true",
+        help="Print accuracy percent per tag and exact-match percent",
+    )
     args = arg_parser.parse_args()
 
     sys.exit(main(args))
