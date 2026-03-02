@@ -37,6 +37,8 @@ def limit_samples_per_tag(
     if max_per_tag is None or max_per_tag <= 0:
         return emails
 
+    before = len(emails)
+
     rng = random.Random(random_state)
 
     # Build tag -> email indices mapping
@@ -61,7 +63,7 @@ def limit_samples_per_tag(
             selected_indices.update(indices_list)
         else:
             selected_indices.update(rng.sample(indices_list, max_per_tag))
-
+    print(f"Limited to {max_per_tag} samples per tag: {before} -> {len(emails)} emails")
     return [emails[i] for i in sorted(selected_indices)]
 
 
@@ -81,11 +83,7 @@ def train_with_random_forest(emails):
     max_per_tag = training_cfg.get("max_samples_per_tag")
     if max_per_tag is not None and max_per_tag > 0:
         random_state = training_cfg.get("random_state", 42)
-        before = len(emails)
         emails = limit_samples_per_tag(emails, max_per_tag, random_state)
-        print(
-            f"Limited to {max_per_tag} samples per tag: {before} -> {len(emails)} emails"
-        )
 
     if not emails:
         print("No emails found.")
@@ -101,52 +99,54 @@ def train_with_random_forest(emails):
         print(f"Error during training: {e}")
 
 
-def train_with_fine_tune(upload=False, start_job=False):
-    if not env.OPENAI_API_KEY:
-        print("OPENAI_API_KEY not set. Cannot upload or start job.", file=sys.stderr)
-        return 1
+def prepare_training_data(emails: List[Dict[str, Any]], n_epochs: int):
+    """
+    Prepare training and validation data from emails.
+    When n_epochs is 1, no validation split is created (all data used for training).
+    """
+    if n_epochs == 1:
+        print(f"Prepared training data (no validation): {len(emails)} train")
+        return emails, []
 
-    fine_tune_cfg = config.get("fine_tune", {})
     training_cfg = config.get("training", {})
-
-    train_file = fine_tune_cfg.get("train_file", "data/finetune_train.jsonl")
-    validation_file = fine_tune_cfg.get("validation_file", "data/finetune_valid.jsonl")
-    n_epochs = fine_tune_cfg.get("n_epochs", 3)
-    validation_frac = training_cfg.get("test_size", 0.2)
     random_state = training_cfg.get("random_state", 42)
-
-    emails = load_emails(folder="archive")
-    if training_cfg.get("max_samples_per_tag") > 0:
-        before = len(emails)
-        emails = limit_samples_per_tag(
-            emails, training_cfg.get("max_samples_per_tag"), random_state
-        )
-        print(
-            f"Limited to {training_cfg.get('max_samples_per_tag')} samples per tag: {before} -> {len(emails)} emails"
-        )
-    if not emails:
-        print("No emails found for this year. Exiting.")
-        return 1
-
-    # Train / validation split
     rng = random.Random(random_state)
     indices = list(range(len(emails)))
     rng.shuffle(indices)
-    n_val = max(1, int(len(emails) * validation_frac))
+    n_val = max(1, int(len(emails) * training_cfg.get("test_size", 0.2)))
     val_indices = set(indices[:n_val])
     train_emails = [emails[i] for i in indices if i not in val_indices]
     validation_emails = [emails[i] for i in indices if i in val_indices]
-    print(f"Split: {len(train_emails)} train, {len(validation_emails)} validation")
+    print(
+        f"Prepared training and validation data: {len(train_emails)} train, {len(validation_emails)} validation"
+    )
+    return train_emails, validation_emails
 
-    llm = LLMTagModel(env.OPENAI_API_KEY)
-    llm._all_tags = get_all_tags(emails)
+
+def upload_and_start_job(
+    model: str,
+    upload: bool,
+    start_job: bool,
+    train_emails: List[Dict[str, Any]],
+    validation_emails: List[Dict[str, Any]],
+):
+    fine_tune_cfg = config.get("fine_tune", {})
+    train_file = fine_tune_cfg.get("train_file")
+    validation_file = fine_tune_cfg.get("validation_file")
+    n_epochs = fine_tune_cfg.get("n_epochs")
+
+    llm = LLMTagModel(env.OPENAI_API_KEY, model=model)
+    llm._all_tags = get_all_tags()
     llm._write_finetune_jsonl(train_emails, train_file)
-    llm._write_finetune_jsonl(validation_emails, validation_file)
+    if validation_emails:
+        llm._write_finetune_jsonl(validation_emails, validation_file)
 
     if not upload:
         return 0
     train_file_id = llm._upload_train_data(train_file)
-    validation_file_id = llm._upload_train_data(validation_file)
+    validation_file_id = (
+        llm._upload_train_data(validation_file) if validation_emails else None
+    )
 
     if not start_job:
         return 0
@@ -155,7 +155,32 @@ def train_with_fine_tune(upload=False, start_job=False):
         validation_file_id=validation_file_id,
         n_epochs=n_epochs,
     )
-    return 0
+
+
+def train_with_fine_tune(upload=False, start_job=False):
+    if not env.OPENAI_API_KEY:
+        print("OPENAI_API_KEY not set. Cannot upload or start job.", file=sys.stderr)
+        return 1
+
+    emails = load_emails(folder="archive")
+    if not emails:
+        print("No emails found for archive folder")
+        return 1
+
+    max_samples_per_tag = config.get("training", {}).get("max_samples_per_tag")
+    if max_samples_per_tag > 0:
+        emails = limit_samples_per_tag(emails, max_samples_per_tag)
+
+    n_epochs = config.get("fine_tune", {}).get("n_epochs")
+    train_emails, validation_emails = prepare_training_data(emails, n_epochs)
+
+    return upload_and_start_job(
+        model="gpt-4o-mini-2024-07-18",
+        upload=upload,
+        start_job=start_job,
+        train_emails=train_emails,
+        validation_emails=validation_emails,
+    )
 
 
 def retrain_fine_tune(
@@ -172,17 +197,7 @@ def retrain_fine_tune(
         print("OPENAI_API_KEY not set. Cannot upload or start job.", file=sys.stderr)
         return 1
 
-    fine_tune_cfg = config.get("fine_tune", {})
-    training_cfg = config.get("training", {})
-    train_file = fine_tune_cfg.get("train_file", "data/finetune_train.jsonl")
-    validation_file = fine_tune_cfg.get("validation_file", "data/finetune_valid.jsonl")
-    n_epochs = fine_tune_cfg.get("n_epochs", 3)
-    validation_frac = training_cfg.get("test_size", 0.2)
-    random_state = training_cfg.get("random_state", 42)
-    rng = random.Random(random_state)
-
     use_incorrect = emails_path and Path(emails_path).exists()
-
     if use_incorrect:
         path = Path(emails_path)
         with open(path, "r", encoding="utf-8") as f:
@@ -193,33 +208,19 @@ def retrain_fine_tune(
     if not emails:
         print("No emails found")
         return 1
-    indices = list(range(len(emails)))
-    rng.shuffle(indices)
-    n_val = max(1, int(len(emails) * validation_frac))
-    val_indices = set(indices[:n_val])
-    train_emails = [emails[i] for i in indices if i not in val_indices]
-    validation_emails = [emails[i] for i in indices if i in val_indices]
-    print(
-        f"Retrain from DB: {len(train_emails)} train, {len(validation_emails)} validation"
-    )
-    llm = LLMTagModel(env.OPENAI_API_KEY, model=env.FINE_TUNE_MODEL_ID)
-    llm._all_tags = get_all_tags()
-    llm._write_finetune_jsonl(train_emails, train_file)
-    llm._write_finetune_jsonl(validation_emails, validation_file)
 
-    llm = LLMTagModel(env.OPENAI_API_KEY, model=env.FINE_TUNE_MODEL_ID)
-    if not upload:
-        return 0
-    train_file_id = llm._upload_train_data(train_file)
-    validation_file_id = llm._upload_train_data(validation_file)
-    if not start_job:
-        return 0
-    llm._start_job(
-        file_id=train_file_id,
-        validation_file_id=validation_file_id,
-        n_epochs=n_epochs,
+    fine_tune_cfg = config.get("fine_tune", {})
+    n_epochs = fine_tune_cfg.get("n_epochs")
+
+    train_emails, validation_emails = prepare_training_data(emails, n_epochs)
+
+    return upload_and_start_job(
+        model=env.FINE_TUNE_MODEL_ID,
+        upload=upload,
+        start_job=start_job,
+        train_emails=train_emails,
+        validation_emails=validation_emails,
     )
-    return 0
 
 
 def main(args):
