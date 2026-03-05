@@ -206,7 +206,7 @@ class EmailDownloader:
         self,
         thread_id: str,
         email_timestamp: str,
-        current_folder: Optional[str] = None,
+        current_folder: str,
         tags: List[str] = [],
     ) -> bool:
         """
@@ -269,19 +269,15 @@ class EmailDownloader:
                         logger.warning(
                             f"Error comparing timestamps for thread {thread_id}: {e}"
                         )
-                # Always update current_folder if provided
-                if current_folder:
-                    try:
-                        update_folder_sql = (
-                            "UPDATE threads SET current_folder = ? WHERE ThreadID = ?"
-                        )
-                        self.conn.execute(
-                            update_folder_sql, [current_folder, thread_id]
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            f"Error updating current_folder for thread {thread_id}: {e}"
-                        )
+                try:
+                    self.conn.execute(
+                        "UPDATE threads SET current_folder = ?, Tags = ? WHERE ThreadID = ?",
+                        [current_folder, tags, thread_id],
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Error updating current_folder for thread {thread_id}: {e}"
+                    )
                 return True
             else:
                 # Create new thread
