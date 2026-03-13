@@ -67,7 +67,7 @@ def limit_samples_per_tag(
     return [emails[i] for i in sorted(selected_indices)]
 
 
-def train_with_random_forest(emails):
+def train_with_random_forest():
     # Get paths from config (from utils.config)
     paths = config.get("paths", {})
     model_path = paths.get("model_output", "models/email_classifier.pkl")
